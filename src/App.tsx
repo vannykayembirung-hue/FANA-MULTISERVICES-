@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { AppProvider, useApp } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/auth/AuthScreen';
@@ -68,5 +69,10 @@ function SessionRouter() {
 }
 
 export default function App() {
-  return <AuthProvider><SessionRouter /></AuthProvider>;
+  return (
+    <>
+      <AuthProvider><SessionRouter /></AuthProvider>
+      <Analytics />
+    </>
+  );
 }
