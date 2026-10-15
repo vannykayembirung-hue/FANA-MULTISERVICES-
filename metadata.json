@@ -1,0 +1,6 @@
+{
+  "name": "F.A.N.A MULTISERVICES - Caisse POS & Gestion",
+  "description": "Système 2-en-1 pour alimentation et multiservices : Poste de vente ultra-rapide tactile, gestion des stocks FEFO & DLC, crédits clients et multiservices.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
