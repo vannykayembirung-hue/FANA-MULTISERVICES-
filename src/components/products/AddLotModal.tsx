@@ -1,115 +1,96 @@
 import React, { useState } from 'react';
 import { Produit, Lot } from '../../types';
-import { X, Check, Calendar, Plus } from 'lucide-react';
+import { X, Check, Plus } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 interface AddLotModalProps {
   product: Produit;
-  onAddLot: (lot: Omit<Lot, 'id' | 'produitId'>) => void;
+  onAddLot: (lot: Omit<Lot, 'id' | 'produitId'>) => Promise<boolean> | boolean;
   onClose: () => void;
 }
 
 export const AddLotModal: React.FC<AddLotModalProps> = ({ product, onAddLot, onClose }) => {
-  const [numeroLot, setNumeroLot] = useState<string>(
-    `LOT-${Date.now().toString().slice(-4)}`
-  );
-  const [quantite, setQuantite] = useState<number>(10);
-  const [dlc, setDlc] = useState<string>(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + 3);
-    return d.toISOString().split('T')[0];
-  });
+  const { toBaseAmount, displayCurrency, isSaving } = useApp();
+  const [numeroLot, setNumeroLot] = useState('');
+  const [quantite, setQuantite] = useState('');
+  const [prixAchat, setPrixAchat] = useState('');
+  const [dlc, setDlc] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (quantite <= 0 || !dlc) return;
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const quantity = Number(quantite);
+    const enteredPrice = Number(prixAchat);
+    if (!numeroLot.trim() || !dlc || !quantite.trim() || !prixAchat.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(enteredPrice) || enteredPrice < 0) return;
+    let priceCdf: number;
+    try { priceCdf = toBaseAmount(enteredPrice); }
+    catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Taux de conversion indisponible.');
+      return;
+    }
 
-    onAddLot({
-      numeroLot,
-      quantite,
-      dlc,
-      dateReception: new Date().toISOString().split('T')[0],
-    });
-    onClose();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const saved = await onAddLot({
+        numeroLot: numeroLot.trim(),
+        quantite: quantity,
+        prixAchat: priceCdf,
+        dlc,
+        dateReception: new Date().toISOString().slice(0, 10),
+      });
+      if (saved) onClose();
+      else setError('Le lot n’a pas été enregistré. Vérifiez le message du serveur puis réessayez.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-        <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950 p-4">
           <div className="flex items-center gap-2">
-            <Plus className="w-5 h-5 text-orange-400" />
+            <Plus className="h-5 w-5 text-orange-400" />
             <div>
-              <h3 className="font-bold text-white text-base">Nouveau Lot FEFO</h3>
+              <h3 className="font-bold text-white">Nouveau lot FEFO</h3>
               <p className="text-xs text-slate-400">{product.nom}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center"
-          >
-            <X className="w-5 h-5" />
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Fermer">
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-4 text-xs">
-          <div className="space-y-1">
-            <label className="text-slate-300 font-semibold block">Numéro de Lot Fournisseur</label>
-            <input
-              type="text"
-              required
-              value={numeroLot}
-              onChange={e => setNumeroLot(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono focus:outline-hidden focus:border-orange-500"
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-4 overflow-y-auto p-4 text-xs">
+          <label className="block space-y-1">
+            <span className="font-semibold text-slate-300">Numéro réel du lot *</span>
+            <input required maxLength={80} value={numeroLot} onChange={event => setNumeroLot(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono focus:border-orange-500" />
+          </label>
 
-          <div className="space-y-1">
-            <label className="text-slate-300 font-semibold block">
-              Quantité à réceptionner ({product.unite})
-            </label>
-            <input
-              type="number"
-              min="0.1"
-              step="any"
-              required
-              value={quantite}
-              onChange={e => setQuantite(parseFloat(e.target.value) || 0)}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-hidden focus:border-orange-500"
-            />
-          </div>
+          <label className="block space-y-1">
+            <span className="font-semibold text-slate-300">Quantité reçue ({product.unite}) *</span>
+            <input required type="number" min="0.001" step="0.001" value={quantite} onChange={event => setQuantite(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono focus:border-orange-500" />
+          </label>
 
-          <div className="space-y-1">
-            <label className="text-slate-300 font-semibold block">
-              DLC (Date Limite de Consommation) *
-            </label>
-            <div className="relative">
-              <input
-                type="date"
-                required
-                value={dlc}
-                onChange={e => setDlc(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-hidden focus:border-orange-500"
-              />
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Ce lot sera déstocké en priorité selon le principe FEFO (First Expired First Out).
-            </p>
-          </div>
+          <label className="block space-y-1">
+            <span className="font-semibold text-slate-300">Coût d’achat unitaire ({displayCurrency}) *</span>
+            <input required type="number" min="0" step="any" value={prixAchat} onChange={event => setPrixAchat(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white font-mono focus:border-orange-500" />
+          </label>
 
-          <div className="pt-2 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
-            >
-              Annuler
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-orange-500/20"
-            >
-              <Check className="w-4 h-4" />
-              <span>Valider la réception</span>
+          <label className="block space-y-1">
+            <span className="font-semibold text-slate-300">Date limite de consommation (DLC) *</span>
+            <input required type="date" value={dlc} onChange={event => setDlc(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white focus:border-orange-500" />
+          </label>
+
+          <p className="text-[11px] leading-5 text-slate-400">Le stock sera déstocké selon la date limite réelle du lot (FEFO).</p>
+          {error && <p role="alert" className="rounded-lg border border-red-900 bg-red-950/40 p-2 text-red-200">{error}</p>}
+
+          <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
+            <button type="button" onClick={onClose} className="rounded-xl bg-slate-800 px-4 py-2.5 font-semibold text-slate-300 hover:bg-slate-700">Annuler</button>
+            <button type="submit" disabled={submitting || isSaving} className="flex items-center gap-1.5 rounded-xl bg-orange-500 px-5 py-2.5 font-bold text-white shadow-lg shadow-orange-500/20 hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50">
+              <Check className="h-4 w-4" /> Enregistrer le lot
             </button>
           </div>
         </form>

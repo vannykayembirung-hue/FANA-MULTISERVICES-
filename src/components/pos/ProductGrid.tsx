@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Produit } from '../../types';
 import { formatCurrencyShort, getDlcStatus } from '../../utils/format';
-import { hardwareScanner, ScannerStatus, ScannerInterface } from '../../utils/hardwareScanner';
+import { hardwareScanner, ScannerStatus } from '../../utils/hardwareScanner';
 import { HardwareScannerModal } from './HardwareScannerModal';
 import { 
   Search, 
   Barcode, 
   Scale, 
-  AlertCircle, 
+  AlertCircle,
   Layers,
-  Sparkles,
-  Camera,
   Check,
-  Usb,
-  Cpu
+  Usb
 } from 'lucide-react';
 import { posAudio } from '../../utils/audio';
 
@@ -31,7 +28,6 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('TOUS');
   const [barcodeInput, setBarcodeInput] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [scannerSimulationOpen, setScannerSimulationOpen] = useState<boolean>(false);
   const [scanSuccessMessage, setScanSuccessMessage] = useState<string | null>(null);
   const [isHardwareModalOpen, setIsHardwareModalOpen] = useState<boolean>(false);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus>(hardwareScanner.getStatus());
@@ -122,7 +118,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
-            placeholder="Rechercher produit, rayon... (ex: Riz, Huile, Pain)"
+            placeholder="Rechercher un produit ou un rayon…"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-2 bg-slate-850 border border-slate-750 rounded-xl text-white text-sm placeholder-slate-400 focus:outline-hidden focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
@@ -142,7 +138,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           <Barcode className="w-4 h-4 text-orange-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
-            placeholder="Scan EAN douchette..."
+            placeholder="Scanner / saisir un EAN"
             value={barcodeInput}
             onChange={e => setBarcodeInput(e.target.value)}
             className="w-full pl-8 pr-7 py-2 bg-slate-850 border border-slate-750 rounded-xl text-white text-xs font-mono placeholder-slate-500 focus:outline-hidden focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
@@ -175,43 +171,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           )}
         </button>
 
-        {/* Simulated Camera Scanner trigger */}
-        <button
-          type="button"
-          onClick={() => setScannerSimulationOpen(!scannerSimulationOpen)}
-          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 flex items-center gap-1.5 text-xs font-semibold shrink-0 transition-colors"
-          title="Simulateur de Scan Caméra / Douchette"
-        >
-          <Camera className="w-4 h-4 text-orange-400" />
-          <span className="hidden sm:inline">Scan Caméra</span>
-        </button>
       </div>
-
-      {/* Barcode Simulator Dropdown Drawer */}
-      {scannerSimulationOpen && (
-        <div className="bg-slate-950 p-3 border-b border-orange-500/30 flex flex-wrap items-center gap-2 text-xs animate-in slide-in-from-top-2">
-          <span className="text-orange-400 font-bold flex items-center gap-1">
-            <Sparkles className="w-3.5 h-3.5" /> Douchette Express (Cliquez pour scanner) :
-          </span>
-          {products.slice(0, 6).map(p => (
-            <button
-              key={p.id}
-              onClick={() => {
-                if (p.unite === 'KG') {
-                  onRequestWeigh(p);
-                } else {
-                  onSelectProduct(p);
-                }
-                setScanSuccessMessage(`Scanné : ${p.nom}`);
-                setTimeout(() => setScanSuccessMessage(null), 2000);
-              }}
-              className="px-2 py-1 rounded-md bg-slate-800 hover:bg-orange-500/20 hover:border-orange-500 text-slate-300 border border-slate-700 font-mono text-[11px]"
-            >
-              {p.nom.split(' ')[0]} ({p.ean.slice(-4)})
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Notification Toast for Scan */}
       {scanSuccessMessage && (
@@ -364,7 +324,6 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       {/* Modal: Web Serial & Web HID Hardware Scanner Configuration */}
       {isHardwareModalOpen && (
         <HardwareScannerModal
-          products={products}
           onBarcodeDetected={(barcode, source) => {
             const cleanEan = barcode.trim();
             const matched = products.find(p => p.ean === cleanEan);

@@ -1,101 +1,129 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { formatFCFA, formatDateTime, formatCurrencyShort } from '../../utils/format';
+import { formatMoney, formatDateTime } from '../../utils/format';
+import { FlotteSolde, ServiceCatalogType, ServiceTransaction } from '../../types';
 import { MultiserviceReceiptModal } from './MultiserviceReceiptModal';
-import { 
-  Smartphone, 
-  Send, 
-  ArrowDownLeft, 
-  Printer, 
-  Zap, 
-  PhoneCall, 
-  Check, 
-  Clock, 
-  DollarSign, 
-  ShieldCheck,
-  FileText,
-  Wallet,
-  Coins,
-  ArrowUpRight,
-  Receipt,
-  X
-} from 'lucide-react';
+import { Smartphone, Send, ArrowDownLeft, Printer, Check, Clock, Wallet, Coins, X, Plus, Pencil, Trash2 } from 'lucide-react';
+
+type ServiceOption = { nom: string; type: 'DEPOT' | 'PRESTATION' | 'RECHARGE'; customId?: string };
+
+const BUILT_IN_SERVICES: ServiceOption[] = [
+  { nom: 'M-Pesa', type: 'DEPOT' },
+  { nom: 'Orange Money', type: 'DEPOT' },
+  { nom: 'Airtel Money', type: 'DEPOT' },
+  { nom: 'Afrimoney', type: 'DEPOT' },
+  { nom: 'Recharge crédit mobile (saisie manuelle)', type: 'RECHARGE' },
+  { nom: 'Photocopie N&B', type: 'PRESTATION' },
+  { nom: 'Impression couleur', type: 'PRESTATION' },
+];
 
 export const MultiservicesView: React.FC = () => {
-  const { services, addServiceTransaction, flotteSolde, updateFlotteSolde } = useApp();
-
-  const [selectedService, setSelectedService] = useState<string>('Wave');
+  const {
+    services, serviceCatalog, addServiceTransaction, addServiceCatalogItem, updateServiceCatalogItem, deleteServiceCatalogItem,
+    currentRole, flotteSolde, updateFlotteSolde, caisseSession, toBaseAmount, displayCurrency, isSaving,
+  } = useApp();
+  const providers: Array<{ id: keyof FlotteSolde; label: string }> = [
+    { id: 'mpesa', label: 'M-Pesa' },
+    { id: 'orangeMoney', label: 'Orange Money' },
+    { id: 'airtelMoney', label: 'Airtel Money' },
+    { id: 'afrimoney', label: 'Afrimoney' },
+  ];
+  const serviceOptions: ServiceOption[] = [
+    ...BUILT_IN_SERVICES,
+    ...serviceCatalog.map(item => ({ nom: item.nom, type: item.type, customId: item.id })),
+  ];
+  const [selectedService, setSelectedService] = useState<string>('M-Pesa');
   const [txType, setTxType] = useState<'DEPOT' | 'RETRAIT' | 'PRESTATION' | 'RECHARGE'>('DEPOT');
-  const [montantStr, setMontantStr] = useState<string>('10000');
+  const [montantStr, setMontantStr] = useState<string>('');
   const [telephoneClient, setTelephoneClient] = useState<string>('');
-  const [reference, setReference] = useState<string>(`WV-${Math.floor(10000 + Math.random() * 90000)}`);
+  const [reference, setReference] = useState<string>('');
   const [customCommission, setCustomCommission] = useState<string>('');
   const [successToast, setSuccessToast] = useState<string | null>(null);
-
-  // Receipt modal state
-  const [receiptTx, setReceiptTx] = useState<any | null>(null);
-
-  // Flotte modal state
+  const [receiptTx, setReceiptTx] = useState<ServiceTransaction | null>(null);
   const [isFlotteModalOpen, setIsFlotteModalOpen] = useState<boolean>(false);
-  const [flotteTarget, setFlotteTarget] = useState<'wave' | 'orangeMoney' | 'woyofal'>('wave');
+  const [flotteTarget, setFlotteTarget] = useState<keyof FlotteSolde>('mpesa');
   const [flotteAction, setFlotteAction] = useState<'AJOUT' | 'RETRAIT'>('AJOUT');
-  const [flotteAmountStr, setFlotteAmountStr] = useState<string>('50000');
+  const [flotteAmountStr, setFlotteAmountStr] = useState<string>('');
+  const [flotteError, setFlotteError] = useState<string | null>(null);
+  const [isServiceManagerOpen, setIsServiceManagerOpen] = useState(false);
+  const [serviceNameInput, setServiceNameInput] = useState('');
+  const [serviceTypeInput, setServiceTypeInput] = useState<ServiceCatalogType>('PRESTATION');
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
 
-  const montantNum = parseFloat(montantStr) || 0;
-
-  // Calculate default commission based on service type & amount
-  const computeDefaultCommission = (): number => {
-    if (customCommission !== '') {
-      return parseFloat(customCommission) || 0;
-    }
-
-    if (selectedService === 'Wave') {
-      // ~1% max commission split for agent
-      return Math.max(100, Math.round(montantNum * 0.01));
-    } else if (selectedService === 'Orange Money') {
-      return Math.max(100, Math.round(montantNum * 0.012));
-    } else if (selectedService === 'Woyofal Senelec') {
-      return 150; // flat commission
-    } else if (selectedService === 'Photocopie N&B') {
-      // 80% gross profit margin
-      return Math.round(montantNum * 0.8);
-    } else if (selectedService === 'Recharge Crédit') {
-      return Math.round(montantNum * 0.05);
-    }
-    return Math.round(montantNum * 0.02);
+  const montantNum = Number(montantStr) || 0;
+  const commissionNum = Number(customCommission) || 0;
+  const isMobileMoney = providers.some(provider => provider.label === selectedService);
+  const handleServiceCatalogSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const nom = serviceNameInput.trim();
+    if (nom.length < 2 || nom.length > 100) return;
+    const saved = editingServiceId
+      ? await updateServiceCatalogItem(editingServiceId, nom, serviceTypeInput)
+      : await addServiceCatalogItem(nom, serviceTypeInput);
+    if (!saved) return;
+    setSelectedService(nom);
+    setTxType(serviceTypeInput);
+    setServiceNameInput('');
+    setServiceTypeInput('PRESTATION');
+    setEditingServiceId(null);
   };
 
-  const calculatedCommission = computeDefaultCommission();
+  const handleEditService = (item: { id: string; nom: string; type: ServiceCatalogType }) => {
+    setEditingServiceId(item.id);
+    setServiceNameInput(item.nom);
+    setServiceTypeInput(item.type);
+  };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleDeleteService = async (item: { id: string; nom: string }) => {
+    if (!window.confirm(`Supprimer « ${item.nom} » de la liste des services ? Les opérations déjà enregistrées resteront dans l’historique.`)) return;
+    const deleted = await deleteServiceCatalogItem(item.id);
+    if (!deleted) return;
+    if (selectedService === item.nom) {
+      setSelectedService('M-Pesa');
+      setTxType('DEPOT');
+    }
+    if (editingServiceId === item.id) {
+      setEditingServiceId(null);
+      setServiceNameInput('');
+      setServiceTypeInput('PRESTATION');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (montantNum <= 0) return;
-
-    const created = addServiceTransaction({
+    if (montantNum <= 0 || commissionNum < 0) return;
+    let montantCdf: number;
+    let commissionCdf: number;
+    try {
+      montantCdf = toBaseAmount(montantNum);
+      commissionCdf = toBaseAmount(commissionNum);
+    } catch { return; }
+    const created = await addServiceTransaction({
       nom: selectedService,
       type: txType,
-      montant: montantNum,
-      commission: calculatedCommission,
-      reference,
-      telephoneClient: telephoneClient || undefined,
+      montant: montantCdf,
+      commission: commissionCdf,
+      reference: reference.trim(),
+      telephoneClient: telephoneClient.trim() || undefined,
     });
-
+    if (!created) return;
     setReceiptTx(created);
-    setSuccessToast(`Transaction ${selectedService} (${formatFCFA(montantNum)}) enregistrée avec succès !`);
+    setSuccessToast(`Opération enregistrée : ${selectedService}, ${formatMoney(created.montant)}.`);
     setTimeout(() => setSuccessToast(null), 3000);
-
-    // Reset inputs
-    setMontantStr('10000');
+    setMontantStr('');
     setTelephoneClient('');
-    setReference(`${selectedService.slice(0, 2).toUpperCase()}-${Math.floor(10000 + Math.random() * 90000)}`);
+    setReference('');
     setCustomCommission('');
   };
 
-  // Summaries
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayServices = services.filter(s => s.date.startsWith(todayStr));
-  const totalVolumeToday = todayServices.reduce((acc, s) => acc + s.montant, 0);
-  const totalCommissionsToday = todayServices.reduce((acc, s) => acc + s.commission, 0);
+  const localDateKey = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  };
+  const todayStr = localDateKey(new Date().toISOString());
+  const todayServices = services.filter(service => localDateKey(service.date) === todayStr);
+  const totalVolumeToday = todayServices.reduce((acc, service) => acc + service.montant, 0);
+  const totalCommissionsToday = todayServices.reduce((acc, service) => acc + service.commission, 0);
 
   return (
     <div className="flex-1 p-4 lg:p-6 overflow-y-auto space-y-6 bg-slate-900 text-slate-100">
@@ -108,8 +136,8 @@ export const MultiservicesView: React.FC = () => {
               Mobile Money &amp; Bureautique
             </span>
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Dépôts, retraits, recharges Woyofal et photocopies avec calcul automatique de vos commissions.
+          <p className="mt-0.5 max-w-3xl text-xs leading-5 text-slate-400">
+            Saisie et suivi manuels des opérations mobile money et prestations. L’application n’exécute aucun transfert et ne calcule pas de commission réglementaire : saisissez le montant réellement constaté.
           </p>
         </div>
 
@@ -117,11 +145,11 @@ export const MultiservicesView: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="px-3 py-2 bg-slate-850 rounded-xl border border-slate-750 text-right">
             <span className="text-[10px] text-slate-400 uppercase font-semibold block">Volume Traité Jour</span>
-            <span className="text-sm font-black text-white font-mono">{formatFCFA(totalVolumeToday)}</span>
+            <span className="text-sm font-black text-white font-mono">{formatMoney(totalVolumeToday)}</span>
           </div>
           <div className="px-3 py-2 bg-slate-850 rounded-xl border border-slate-750 text-right">
             <span className="text-[10px] text-sky-400 uppercase font-bold block">Vos Commissions</span>
-            <span className="text-sm font-black text-emerald-400 font-mono">+{formatFCFA(totalCommissionsToday)}</span>
+            <span className="text-sm font-black text-emerald-400 font-mono">+{formatMoney(totalCommissionsToday)}</span>
           </div>
         </div>
       </div>
@@ -133,56 +161,18 @@ export const MultiservicesView: React.FC = () => {
         </div>
       )}
 
-      {/* Electronic Float & Working Capital (Flottes Wave / OM / Woyofal) */}
-      <div className="p-4 bg-slate-850 border border-slate-750 rounded-2xl space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-sky-400" />
-            <h3 className="font-bold text-white text-sm">Caisse de Roulement &amp; Flottes Électroniques</h3>
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsFlotteModalOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer self-start sm:self-auto"
-          >
-            <Coins className="w-3.5 h-3.5" />
-            <span>Ajuster / Recharger Flotte</span>
-          </button>
+      {/* Operator float balances are empty until entered by the organization */}
+      <div className="space-y-3 rounded-2xl border border-slate-750 bg-slate-850 p-4">
+        <div className="flex flex-col gap-2 border-b border-slate-800 pb-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2"><Wallet className="h-5 w-5 text-sky-400" /><h3 className="text-sm font-bold text-white">Soldes de portefeuille saisis par l’entreprise</h3></div>
+          <button type="button" onClick={() => { setFlotteError(null); setIsFlotteModalOpen(true); }} className="flex items-center gap-1.5 self-start rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-bold text-sky-400 hover:bg-sky-500/20 sm:self-auto"><Coins className="h-3.5 w-3.5" />Ajuster un solde réel</button>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Wave Float */}
-          <div className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block">Solde Flotte Wave</span>
-              <span className="text-lg font-black text-sky-400 font-mono">{formatFCFA(flotteSolde.wave)}</span>
-            </div>
-            <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-xs font-mono">
-              WV
-            </div>
-          </div>
-
-          {/* Orange Money Float */}
-          <div className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block">Solde Flotte Orange Money</span>
-              <span className="text-lg font-black text-orange-400 font-mono">{formatFCFA(flotteSolde.orangeMoney)}</span>
-            </div>
-            <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center font-bold text-xs font-mono">
-              OM
-            </div>
-          </div>
-
-          {/* Woyofal Senelec Float */}
-          <div className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between">
-            <div>
-              <span className="text-[11px] text-slate-400 font-medium block">Solde Compte Woyofal</span>
-              <span className="text-lg font-black text-amber-400 font-mono">{formatFCFA(flotteSolde.woyofal)}</span>
-            </div>
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs">
-              ⚡
-            </div>
-          </div>
+        <p className="text-[11px] leading-5 text-slate-500">Ces soldes sont tenus manuellement. Vérifiez-les auprès des comptes opérateurs; F.A.N.A ne se connecte pas aux réseaux mobile money.</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {providers.map((provider, index) => <div key={provider.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900 p-3.5">
+            <div><span className="block text-[11px] font-medium text-slate-400">{provider.label}</span><span className="font-mono text-lg font-black text-white">{formatMoney(flotteSolde[provider.id])}</span></div>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-black ${index === 0 ? 'bg-red-500/15 text-red-300' : index === 1 ? 'bg-orange-500/15 text-orange-300' : index === 2 ? 'bg-rose-500/15 text-rose-300' : 'bg-violet-500/15 text-violet-300'}`}>{provider.label.slice(0, 2).toUpperCase()}</span>
+          </div>)}
         </div>
       </div>
 
@@ -200,42 +190,27 @@ export const MultiservicesView: React.FC = () => {
             <div>
               <label className="text-slate-300 font-semibold block mb-1.5">Type de Service *</label>
               <div className="grid grid-cols-2 gap-2">
-                {[
-                  { name: 'Wave', color: 'sky' },
-                  { name: 'Orange Money', color: 'orange' },
-                  { name: 'Woyofal Senelec', color: 'amber' },
-                  { name: 'Photocopie N&B', color: 'emerald' },
-                  { name: 'Recharge Crédit', color: 'purple' },
-                  { name: 'Impression Couleur', color: 'blue' },
-                ].map(srv => (
+                {serviceOptions.map(service => (
                   <button
-                    key={srv.name}
+                    key={service.customId || service.nom}
                     type="button"
-                    onClick={() => {
-                      setSelectedService(srv.name);
-                      if (srv.name === 'Photocopie N&B' || srv.name === 'Impression Couleur') {
-                        setTxType('PRESTATION');
-                      } else if (srv.name === 'Woyofal Senelec' || srv.name === 'Recharge Crédit') {
-                        setTxType('RECHARGE');
-                      } else {
-                        setTxType('DEPOT');
-                      }
-                      setReference(`${srv.name.slice(0, 2).toUpperCase()}-${Math.floor(10000 + Math.random() * 90000)}`);
-                    }}
-                    className={`p-2.5 rounded-xl text-xs font-bold text-left border transition-all ${
-                      selectedService === srv.name
-                        ? 'bg-sky-500/20 border-sky-500 text-sky-300 ring-1 ring-sky-500'
-                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750'
-                    }`}
+                    onClick={() => { setSelectedService(service.nom); setTxType(service.type); }}
+                    className={`rounded-xl border p-2.5 text-left text-xs font-bold transition-all ${selectedService === service.nom ? 'bg-sky-500/20 border-sky-500 text-sky-300 ring-1 ring-sky-500' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750'}`}
                   >
-                    {srv.name}
+                    <span className="block">{service.nom}</span>
+                    {service.customId && <span className="mt-1 block text-[9px] font-semibold uppercase tracking-wide text-violet-300">Personnalisé</span>}
                   </button>
                 ))}
+                {currentRole !== 'CAISSIER' && (
+                  <button type="button" onClick={() => { setEditingServiceId(null); setServiceNameInput(''); setServiceTypeInput('PRESTATION'); setIsServiceManagerOpen(true); }} className="col-span-2 flex items-center justify-center gap-2 rounded-xl border border-dashed border-sky-500/40 bg-sky-500/5 p-2.5 text-xs font-bold text-sky-300 hover:bg-sky-500/10">
+                    <Plus className="h-4 w-4" /> Ajouter ou gérer les services
+                  </button>
+                )}
               </div>
             </div>
 
             {/* Transaction Type (Dépôt vs Retrait) */}
-            {['Wave', 'Orange Money'].includes(selectedService) && (
+            {isMobileMoney && (
               <div>
                 <label className="text-slate-300 font-semibold block mb-1.5">Sens du flux</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -268,76 +243,21 @@ export const MultiservicesView: React.FC = () => {
               </div>
             )}
 
-            {/* Montant */}
             <div className="space-y-1">
-              <label className="text-slate-300 font-semibold block">Montant de la Transaction (FCFA) *</label>
-              <input
-                type="number"
-                min="100"
-                step="50"
-                required
-                value={montantStr}
-                onChange={e => setMontantStr(e.target.value)}
-                className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-base font-bold focus:outline-hidden focus:border-sky-500"
-              />
-              {/* Presets */}
-              <div className="flex gap-1.5 pt-1 overflow-x-auto">
-                {[500, 1000, 2000, 5000, 10000, 25000, 50000].map(val => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setMontantStr(val.toString())}
-                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono shrink-0"
-                  >
-                    {val} F
-                  </button>
-                ))}
-              </div>
+              <label className="form-label">Montant réel de l’opération ({displayCurrency}) *</label>
+              <input type="number" min="0.01" step={displayCurrency === 'USD' ? '0.01' : '1'} required value={montantStr} onChange={event => setMontantStr(event.target.value)} className="form-control font-mono text-base font-bold" />
             </div>
 
-            {/* Client Phone & Reference */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-slate-300 font-semibold block">Tél. Client</label>
-                <input
-                  type="text"
-                  placeholder="7X XXX XX XX"
-                  value={telephoneClient}
-                  onChange={e => setTelephoneClient(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-hidden focus:border-sky-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-slate-300 font-semibold block">Réf. Transaction</label>
-                <input
-                  type="text"
-                  value={reference}
-                  onChange={e => setReference(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-hidden focus:border-sky-500"
-                />
-              </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="block"><span className="form-label">Téléphone (facultatif)</span><input inputMode="tel" placeholder="+243…" value={telephoneClient} onChange={event => setTelephoneClient(event.target.value)} className="form-control font-mono" /></label>
+              <label className="block"><span className="form-label">Référence réelle (facultatif)</span><input maxLength={100} value={reference} onChange={event => setReference(event.target.value)} placeholder="Référence fournie par l’opérateur" className="form-control font-mono" /></label>
             </div>
 
-            {/* Commission calculation preview */}
-            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400 font-medium">Commission F.A.N.A calculée :</span>
-                <span className="text-base font-extrabold text-emerald-400 font-mono">
-                  +{formatFCFA(calculatedCommission)}
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-500">
-                Calculé automatiquement selon la grille tarifaire en vigueur.
-              </p>
-            </div>
+            <label className="block"><span className="form-label">Commission réellement perçue ({displayCurrency}) *</span><input type="number" min="0" step={displayCurrency === 'USD' ? '0.01' : '1'} required value={customCommission} onChange={event => setCustomCommission(event.target.value)} placeholder="Entrez 0 si aucune commission n’a été perçue" className="form-control font-mono" /></label>
+            <div className="rounded-xl border border-amber-800/60 bg-amber-950/25 p-3 text-[10px] leading-5 text-amber-100">Aucun transfert n’est envoyé par l’application. Confirmez l’opération auprès de l’opérateur avant de l’enregistrer. Une session de caisse doit être ouverte.</div>
 
-            <button
-              type="submit"
-              className="w-full py-3.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-sky-500/20 transition-all"
-            >
-              <Check className="w-4 h-4" />
-              <span>Valider l'Opération &amp; Caisse</span>
+            <button type="submit" disabled={isSaving || caisseSession.statut !== 'OUVERTE' || montantNum <= 0} className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 px-4 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-sky-500/20 transition-all hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50">
+              <Check className="h-4 w-4" /><span>{isSaving ? 'Enregistrement…' : caisseSession.statut !== 'OUVERTE' ? 'Ouvrez une caisse pour continuer' : 'Enregistrer l’opération vérifiée'}</span>
             </button>
           </form>
         </div>
@@ -369,14 +289,10 @@ export const MultiservicesView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {services.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-500">
-                        Aucune opération multiservices enregistrée.
-                      </td>
-                    </tr>
+                  {todayServices.length === 0 ? (
+                    <tr><td colSpan={7} className="py-8 text-center text-slate-500">Aucune opération enregistrée aujourd’hui.</td></tr>
                   ) : (
-                    services.map(srv => (
+                    todayServices.map(srv => (
                       <tr key={srv.id} className="hover:bg-slate-800/40">
                         <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px]">
                           {formatDateTime(srv.date)}
@@ -398,10 +314,10 @@ export const MultiservicesView: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-100">
-                          {formatFCFA(srv.montant)}
+                          {formatMoney(srv.montant)}
                         </td>
                         <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
-                          +{formatFCFA(srv.commission)}
+                          +{formatMoney(srv.commission)}
                         </td>
                         <td className="py-2.5 px-3 text-[11px] text-slate-400 font-mono">
                           {srv.reference || '-'} {srv.telephoneClient ? `(${srv.telephoneClient})` : ''}
@@ -426,13 +342,79 @@ export const MultiservicesView: React.FC = () => {
           </div>
 
           <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-            <span className="text-slate-400">Total Commissions Générées :</span>
+            <span className="text-slate-400">Commissions enregistrées aujourd’hui :</span>
             <span className="text-lg font-black text-emerald-400 font-mono">
-              +{formatFCFA(services.reduce((acc, s) => acc + s.commission, 0))}
+              {formatMoney(totalCommissionsToday)}
             </span>
           </div>
         </div>
       </div>
+
+      {/* Modal: Manage the organization's additional services */}
+      {isServiceManagerOpen && currentRole !== 'CAISSIER' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) setIsServiceManagerOpen(false); }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="service-manager-title" className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 bg-slate-950 p-4">
+              <div>
+                <h3 id="service-manager-title" className="font-bold text-white">Gestion des services</h3>
+                <p className="mt-1 text-[11px] text-slate-400">Ajoutez et modifiez les services proposés par votre organisation.</p>
+              </div>
+              <button type="button" onClick={() => setIsServiceManagerOpen(false)} aria-label="Fermer" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto p-4">
+              <form onSubmit={handleServiceCatalogSubmit} className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <h4 className="text-xs font-bold text-slate-200">{editingServiceId ? 'Modifier un service' : 'Ajouter un service'}</h4>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="service-catalog-name" className="mb-1 block text-[11px] font-semibold text-slate-300">Nom du service</label>
+                    <input id="service-catalog-name" autoFocus value={serviceNameInput} onChange={event => setServiceNameInput(event.target.value)} maxLength={100} minLength={2} required className="form-control" placeholder="Nom du service" />
+                  </div>
+                  <div>
+                    <label htmlFor="service-catalog-type" className="mb-1 block text-[11px] font-semibold text-slate-300">Catégorie</label>
+                    <select id="service-catalog-type" value={serviceTypeInput} onChange={event => setServiceTypeInput(event.target.value as ServiceCatalogType)} className="form-control">
+                      <option value="PRESTATION">Prestation</option>
+                      <option value="RECHARGE">Recharge</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  {editingServiceId && <button type="button" onClick={() => { setEditingServiceId(null); setServiceNameInput(''); setServiceTypeInput('PRESTATION'); }} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800">Annuler</button>}
+                  <button type="submit" disabled={isSaving || serviceNameInput.trim().length < 2} className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-2 text-xs font-bold text-white hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50">
+                    <Plus className="h-3.5 w-3.5" />{isSaving ? 'Enregistrement…' : editingServiceId ? 'Enregistrer les modifications' : 'Ajouter le service'}
+                  </button>
+                </div>
+              </form>
+
+              <section aria-label="Services personnalisés" className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-200">Services personnalisés</h4>
+                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">{serviceCatalog.length}</span>
+                </div>
+                {serviceCatalog.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">Aucun service personnalisé. Les services standards restent disponibles.</p>
+                ) : (
+                  <div className="divide-y divide-slate-800 rounded-xl border border-slate-800">
+                    {serviceCatalog.map(item => (
+                      <div key={item.id} className="flex items-center justify-between gap-3 p-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-100">{item.nom}</p>
+                          <p className="mt-0.5 text-[10px] uppercase tracking-wide text-slate-500">{item.type === 'RECHARGE' ? 'Recharge' : 'Prestation'}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button type="button" onClick={() => handleEditService(item)} title={`Modifier ${item.nom}`} aria-label={`Modifier ${item.nom}`} className="flex h-8 w-8 items-center justify-center rounded-lg text-sky-300 hover:bg-sky-500/10"><Pencil className="h-4 w-4" /></button>
+                          <button type="button" onClick={() => void handleDeleteService(item)} title={`Supprimer ${item.nom}`} aria-label={`Supprimer ${item.nom}`} className="flex h-8 w-8 items-center justify-center rounded-lg text-red-300 hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] leading-4 text-slate-500">La suppression retire le service de la liste sans modifier les opérations déjà enregistrées.</p>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Receipt thermal printing and SMS */}
       {receiptTx && (
@@ -461,31 +443,29 @@ export const MultiservicesView: React.FC = () => {
             </div>
 
             <form
-              onSubmit={e => {
-                e.preventDefault();
-                const amt = parseFloat(flotteAmountStr) || 0;
-                if (amt <= 0) return;
-                const delta = flotteAction === 'AJOUT' ? amt : -amt;
-                if (flotteTarget === 'wave') {
-                  updateFlotteSolde({ wave: Math.max(0, flotteSolde.wave + delta) });
-                } else if (flotteTarget === 'orangeMoney') {
-                  updateFlotteSolde({ orangeMoney: Math.max(0, flotteSolde.orangeMoney + delta) });
-                } else {
-                  updateFlotteSolde({ woyofal: Math.max(0, flotteSolde.woyofal + delta) });
-                }
-                setSuccessToast(`Flotte ${flotteTarget === 'wave' ? 'Wave' : flotteTarget === 'orangeMoney' ? 'Orange Money' : 'Woyofal'} mise à jour avec succès !`);
+              onSubmit={async event => {
+                event.preventDefault();
+                setFlotteError(null);
+                const enteredAmount = Number(flotteAmountStr);
+                if (!Number.isFinite(enteredAmount) || enteredAmount <= 0) return;
+                let amountCdf: number;
+                try { amountCdf = toBaseAmount(enteredAmount); } catch { return; }
+                const delta = flotteAction === 'AJOUT' ? amountCdf : -amountCdf;
+                const nextBalance = flotteSolde[flotteTarget] + delta;
+                if (nextBalance < 0) { setFlotteError('Le retrait dépasse le solde enregistré pour cet opérateur.'); return; }
+                const saved = await updateFlotteSolde({ [flotteTarget]: nextBalance });
+                if (!saved) return;
+                const providerLabel = providers.find(provider => provider.id === flotteTarget)?.label || flotteTarget;
+                setSuccessToast(`Solde ${providerLabel} enregistré : ${formatMoney(nextBalance)}.`);
                 setIsFlotteModalOpen(false);
+                setFlotteAmountStr('');
               }}
-              className="p-5 space-y-4 text-xs"
+              className="space-y-4 p-5 text-xs"
             >
               <div>
                 <label className="text-slate-300 font-semibold block mb-1">Compte Flotte *</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'wave' as const, label: 'Wave', cur: flotteSolde.wave },
-                    { id: 'orangeMoney' as const, label: 'Orange Money', cur: flotteSolde.orangeMoney },
-                    { id: 'woyofal' as const, label: 'Woyofal', cur: flotteSolde.woyofal },
-                  ].map(item => (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {providers.map(item => (
                     <button
                       key={item.id}
                       type="button"
@@ -497,7 +477,7 @@ export const MultiservicesView: React.FC = () => {
                       }`}
                     >
                       <div className="truncate">{item.label}</div>
-                      <div className="text-[10px] font-mono mt-0.5">{formatCurrencyShort(item.cur)}</div>
+                      <div className="text-[10px] font-mono mt-0.5">{formatMoney(flotteSolde[item.id])}</div>
                     </button>
                   ))}
                 </div>
@@ -532,28 +512,10 @@ export const MultiservicesView: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-300 font-semibold block">Montant de l'ajustement (FCFA) *</label>
-                <input
-                  type="number"
-                  min="1000"
-                  step="1000"
-                  required
-                  value={flotteAmountStr}
-                  onChange={e => setFlotteAmountStr(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-base font-bold focus:outline-hidden focus:border-sky-500"
-                />
-                <div className="flex gap-1 pt-1 overflow-x-auto">
-                  {[25000, 50000, 100000, 200000, 500000].map(v => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setFlotteAmountStr(v.toString())}
-                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 text-[10px] font-mono shrink-0 cursor-pointer"
-                    >
-                      {formatCurrencyShort(v)}
-                    </button>
-                  ))}
-                </div>
+                <label className="form-label">Montant réel de l’ajustement ({displayCurrency}) *</label>
+                <input type="number" min="0.01" step={displayCurrency === 'USD' ? '0.01' : '1'} required value={flotteAmountStr} onChange={event => setFlotteAmountStr(event.target.value)} className="form-control font-mono text-base font-bold" />
+                <p className="text-[10px] leading-5 text-slate-500">Saisissez l’ajout ou le retrait constaté sur le compte de cet opérateur.</p>
+                {flotteError && <p role="alert" className="text-xs text-red-300">{flotteError}</p>}
               </div>
 
               <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
@@ -566,7 +528,8 @@ export const MultiservicesView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold cursor-pointer"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold cursor-pointer disabled:opacity-50"
                 >
                   Valider Ajustement
                 </button>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Vente } from '../../types';
-import { formatFCFA, formatDateTime } from '../../utils/format';
+import { formatMoney, formatDateTime } from '../../utils/format';
 import { 
   Receipt, 
   Printer, 
@@ -107,8 +107,8 @@ export const RecentSalesModal: React.FC<RecentSalesModalProps> = ({
                           <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
                             sale.paiement === 'ESPECE'
                               ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : sale.paiement === 'WAVE'
-                              ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                              : sale.paiement === 'MPESA'
+                              ? 'bg-red-500/10 text-red-400 border border-red-500/20'
                               : sale.paiement === 'ORANGE_MONEY'
                               ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                               : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
@@ -133,7 +133,7 @@ export const RecentSalesModal: React.FC<RecentSalesModalProps> = ({
                     <div className="flex items-center gap-3">
                       <div className="text-right">
                         <div className="font-mono font-black text-white text-sm">
-                          {formatFCFA(sale.totalNet)}
+                          {formatMoney(sale.totalNet)}
                         </div>
                         <div className="text-[10px] text-slate-400">
                           {sale.lignes.length} article(s) ({totalItemsCount} unités)
@@ -174,20 +174,20 @@ export const RecentSalesModal: React.FC<RecentSalesModalProps> = ({
                               {line.nomProduit} <span className="text-slate-500 font-mono">x{line.quantite} {line.unite.toLowerCase()}</span>
                             </span>
                             <span className="font-mono font-bold text-slate-200">
-                              {formatFCFA(line.totalLigne)}
+                              {formatMoney(line.totalLigne)}
                             </span>
                           </div>
                         ))}
                         {sale.remise > 0 && (
                           <div className="flex justify-between items-center text-[11px] text-orange-400 pt-1 border-t border-slate-800 font-semibold">
                             <span>Remise accordée :</span>
-                            <span>-{formatFCFA(sale.remise)}</span>
+                            <span>-{formatMoney(sale.remise)}</span>
                           </div>
                         )}
                         {sale.renduMonnaie !== undefined && sale.renduMonnaie > 0 && (
                           <div className="flex justify-between items-center text-[10px] text-emerald-400 pt-0.5 font-mono">
                             <span>Monnaie rendue :</span>
-                            <span>{formatFCFA(sale.renduMonnaie)}</span>
+                            <span>{formatMoney(sale.renduMonnaie)}</span>
                           </div>
                         )}
                       </div>

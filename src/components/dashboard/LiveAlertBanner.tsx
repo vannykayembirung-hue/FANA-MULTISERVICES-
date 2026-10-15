@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Produit } from '../../types';
-import { getDlcStatus, formatFCFA } from '../../utils/format';
+import { getDlcStatus, formatMoney } from '../../utils/format';
 import { posAudio } from '../../utils/audio';
 import { 
   AlertTriangle, 
@@ -260,11 +260,17 @@ export const LiveAlertBanner: React.FC<LiveAlertBannerProps> = ({
                 >
                   <div className="flex items-start gap-2.5">
                     {/* Thumbnail */}
-                    <img
-                      src={alert.product.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=120&auto=format&fit=crop&q=80'}
-                      alt={alert.product.nom}
-                      className="w-12 h-12 rounded-lg object-cover bg-slate-900 border border-slate-700 shrink-0"
-                    />
+                    {alert.product.image ? (
+                      <img
+                        src={alert.product.image}
+                        alt={alert.product.nom}
+                        className="w-12 h-12 rounded-lg object-cover bg-slate-900 border border-slate-700 shrink-0"
+                      />
+                    ) : (
+                      <span aria-hidden="true" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-slate-500">
+                        <PackageX className="h-5 w-5" />
+                      </span>
+                    )}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
@@ -299,7 +305,7 @@ export const LiveAlertBanner: React.FC<LiveAlertBannerProps> = ({
                       <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
                         <span>Rayon : {alert.product.rayon || alert.product.categorie}</span>
                         <span className="font-bold font-mono text-orange-300">
-                          Valeur : {formatFCFA(alert.valeurMenacee)}
+                          Valeur : {formatMoney(alert.valeurMenacee)}
                         </span>
                       </div>
                     </div>

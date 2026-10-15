@@ -1,29 +1,29 @@
-import { Vente, Produit, ServiceTransaction, Client } from '../types';
-import { DaySalesData } from '../components/dashboard/SalesLineChart';
+import type { Vente, Produit, ServiceTransaction, Client } from '../types';
+import type { DaySalesData } from '../components/dashboard/SalesLineChart';
 import { formatDateTime } from './format';
 
-/**
- * Cleanly format numbers for CSV (integer or 2 decimal places without thousand spaces)
- */
-function toCsvNumber(num: number): string {
-  if (isNaN(num)) return '0';
-  return Math.round(num).toString();
+function toCsvNumber(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  return value.toFixed(2).replace(/\.?0+$/, '');
 }
 
-/**
- * Escape CSV cell value according to RFC 4180
- */
-function escapeCsv(val: string | number | undefined | null): string {
-  if (val === null || val === undefined) return '""';
-  const str = String(val).replace(/"/g, '""');
-  return `"${str}"`;
+export function escapeCsvCell(value: string | number | undefined | null): string {
+  if (value === null || value === undefined) return '""';
+  let text = String(value);
+  // Avoid spreadsheet formula execution when a user-controlled name begins with a formula marker.
+  if (typeof value === 'string' && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
-/**
- * Triggers browser download of a CSV file with UTF-8 BOM for Microsoft Excel / Google Sheets compatibility
- */
+const escapeCsv = escapeCsvCell;
+
+function localDateKey(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 export function downloadCsvFile(csvContent: string, fileName: string): void {
-  // \uFEFF is the UTF-8 Byte Order Mark (BOM) ensuring French accents (é, è, à) display properly in Excel
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -35,13 +35,7 @@ export function downloadCsvFile(csvContent: string, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-/**
- * Export complete bookkeeping and sales report:
- * 1. Global Store & Day KPIs
- * 2. 7-Day Sales & Profit Trends
- * 3. Detailed Sales Transactions Ledger
- * 4. Multiservices Commission Ledger
- */
+/** Export amounts in the ledger's base currency (CDF); no assumed address or currency is inserted. */
 export function exportFullAccountingCsv({
   sales,
   trendData,
@@ -50,6 +44,7 @@ export function exportFullAccountingCsv({
   services,
   clients,
   products,
+  organizationName,
 }: {
   sales: Vente[];
   trendData: DaySalesData[];
@@ -58,109 +53,83 @@ export function exportFullAccountingCsv({
   services: ServiceTransaction[];
   clients: Client[];
   products: Produit[];
+  organizationName?: string;
 }): void {
   const now = new Date();
-  const dateStr = now.toISOString().split('T')[0];
+  const todayKey = localDateKey(now);
+  const dateStr = todayKey || now.toISOString().slice(0, 10);
+  const todaySales = sales.filter(sale => localDateKey(sale.createdAt) === todayKey);
+  const todayServices = services.filter(service => localDateKey(service.date) === todayKey);
   const lines: string[] = [];
 
-  // --- HEADER SECTION ---
-  lines.push('F.A.N.A MULTISERVICES - RAPPORT COMMERCIAL ET COMPTABILITE');
-  lines.push(`Date d'exportation;${now.toLocaleString('fr-FR')}`);
-  lines.push('Etablissement;Cite Fadia, Dakar - Senegal');
-  lines.push('Devise;FCFA (Francs CFA)');
+  lines.push(escapeCsv(organizationName || 'Organisation non renseignée') + ';RAPPORT COMMERCIAL ET COMPTABILITÉ');
+  lines.push(`Date d’exportation;${escapeCsv(now.toLocaleString('fr-CD'))}`);
+  lines.push('Devise du grand livre;CDF');
   lines.push('');
 
-  // --- SECTION 1: SYNTHESE DES PERFORMANCES DU JOUR ---
-  lines.push('=== 1. SYNTHESE DES PERFORMANCES DU JOUR ===');
+  lines.push('=== 1. SYNTHÈSE DU JOUR (DONNÉES ENREGISTRÉES) ===');
   lines.push('Indicateur;Valeur');
-  lines.push(`Chiffre d'Affaires du Jour (FCFA);${toCsvNumber(caJour)}`);
-  lines.push(`Marge Nette Reelle du Jour (FCFA);${toCsvNumber(margeJour)}`);
-  lines.push(`Taux de Marge Reelle;${caJour > 0 ? ((margeJour / caJour) * 100).toFixed(1) : 0}%`);
-  lines.push(`Nombre de Ventes du Jour;${sales.filter(s => s.createdAt.startsWith(dateStr)).length}`);
-  lines.push(`Commissions Multiservices (Wave / OM);${toCsvNumber(services.reduce((acc, s) => acc + s.commission, 0))}`);
-  lines.push(`Total Encours Dettes Clients (Ardoises);${toCsvNumber(clients.reduce((acc, c) => acc + c.credit, 0))}`);
+  lines.push(`Chiffre d’affaires net du jour (CDF);${toCsvNumber(caJour)}`);
+  lines.push(`Marge estimée du jour (CDF);${toCsvNumber(margeJour)}`);
+  lines.push(`Taux de marge;${caJour > 0 ? ((margeJour / caJour) * 100).toFixed(1) : '0'}%`);
+  lines.push(`Nombre de ventes du jour;${todaySales.length}`);
+  lines.push(`Commissions multiservices du jour (CDF);${toCsvNumber(todayServices.reduce((sum, service) => sum + service.commission, 0))}`);
+  lines.push(`Encours des crédits clients (CDF);${toCsvNumber(clients.reduce((sum, client) => sum + client.credit, 0))}`);
+  lines.push(`Produits enregistrés;${products.length}`);
   lines.push('');
 
-  // --- SECTION 2: TENDANCES DES VENTES SUR 7 JOURS ---
-  lines.push('=== 2. TENDANCES DES VENTES SUR LES 7 DERNIERS JOURS ===');
-  lines.push('Periode;Date;Chiffre Affaires (FCFA);Marge Nette (FCFA);Taux de Marge (%);Nombre de Tickets');
+  lines.push('=== 2. VENTES DES 7 DERNIERS JOURS (DONNÉES ENREGISTRÉES) ===');
+  lines.push('Période;Date;Chiffre d’affaires (CDF);Marge (CDF);Taux de marge (%);Nombre de tickets');
   trendData.forEach(item => {
     const rate = item.ca > 0 ? ((item.marge / item.ca) * 100).toFixed(1) : '0';
     lines.push([
-      escapeCsv(item.day),
-      escapeCsv(item.dateLabel),
-      toCsvNumber(item.ca),
-      toCsvNumber(item.marge),
-      escapeCsv(`${rate}%`),
-      item.nombreVentes,
+      escapeCsv(item.day), escapeCsv(item.dateLabel), toCsvNumber(item.ca),
+      toCsvNumber(item.marge), escapeCsv(`${rate}%`), item.nombreVentes,
     ].join(';'));
   });
   lines.push('');
 
-  // --- SECTION 3: JOURNAL DETAILLE DES VENTES (GRAND LIVRE CAISSE) ---
-  lines.push('=== 3. JOURNAL DETAILLE DES VENTES (TICKETS DE CAISSE) ===');
-  lines.push('N Ticket;Date et Heure;Caissier;Client / Titulaire;Mode de Paiement;Sous-Total Brut (FCFA);Remise (FCFA);Net a Payer (FCFA);Marge Estimee (FCFA);Articles Vendus');
+  lines.push('=== 3. GRAND LIVRE DES VENTES ===');
+  lines.push('N° ticket;Date et heure;Caissier;Client;Mode de paiement;Sous-total brut (CDF);Remise (CDF);Net à payer (CDF);Marge estimée (CDF);Articles vendus');
   sales.forEach(sale => {
-    const articlesSummary = sale.lignes.map(l => `${l.nomProduit} (x${l.quantite})`).join(' + ');
+    const articles = sale.lignes.map(line => `${line.nomProduit} (x${line.quantite})`).join(' + ');
     lines.push([
-      escapeCsv(sale.numeroTicket),
-      escapeCsv(formatDateTime(sale.createdAt)),
-      escapeCsv(sale.nomCaissier),
-      escapeCsv(sale.nomClient || 'Client Comptant'),
-      escapeCsv(sale.paiement),
-      toCsvNumber(sale.totalBrut),
-      toCsvNumber(sale.remise),
-      toCsvNumber(sale.totalNet),
-      toCsvNumber(sale.margeEstimee),
-      escapeCsv(articlesSummary),
+      escapeCsv(sale.numeroTicket), escapeCsv(formatDateTime(sale.createdAt)),
+      escapeCsv(sale.nomCaissier), escapeCsv(sale.nomClient || 'Comptant'),
+      escapeCsv(sale.paiement), toCsvNumber(sale.totalBrut), toCsvNumber(sale.remise),
+      toCsvNumber(sale.totalNet), toCsvNumber(sale.margeEstimee), escapeCsv(articles),
     ].join(';'));
   });
   lines.push('');
 
-  // --- SECTION 4: OPERATIONS MULTISERVICES & COMMISSIONS ---
-  lines.push('=== 4. JOURNAL DES OPERATIONS MULTISERVICES (WAVE / OM / BUREAUTIQUE) ===');
-  lines.push('ID Transaction;Date et Heure;Service;Type;Montant de Operation (FCFA);Commission Nette FANA (FCFA);Telephone Client;Reference');
-  services.forEach(srv => {
+  lines.push('=== 4. JOURNAL DES OPÉRATIONS MULTISERVICES ===');
+  lines.push('ID transaction;Date et heure;Service;Type;Montant de l’opération (CDF);Commission (CDF);Téléphone client;Référence');
+  services.forEach(service => {
     lines.push([
-      escapeCsv(srv.id),
-      escapeCsv(formatDateTime(srv.date)),
-      escapeCsv(srv.nom),
-      escapeCsv(srv.type),
-      toCsvNumber(srv.montant),
-      toCsvNumber(srv.commission),
-      escapeCsv(srv.telephoneClient || '-'),
-      escapeCsv(srv.reference || '-'),
+      escapeCsv(service.id), escapeCsv(formatDateTime(service.date)), escapeCsv(service.nom),
+      escapeCsv(service.type), toCsvNumber(service.montant), toCsvNumber(service.commission),
+      escapeCsv(service.telephoneClient || ''), escapeCsv(service.reference || ''),
     ].join(';'));
   });
 
-  const content = lines.join('\r\n');
-  downloadCsvFile(content, `FANA-Rapport-Comptable-Ventes-${dateStr}.csv`);
+  downloadCsvFile(lines.join('\r\n'), `FANA-Rapport-Comptable-${dateStr}.csv`);
 }
 
-/**
- * Export 7-day Sales Trends only
- */
 export function exportSalesTrendsCsv(trendData: DaySalesData[]): void {
-  const dateStr = new Date().toISOString().split('T')[0];
-  const lines: string[] = [];
-
-  lines.push('F.A.N.A MULTISERVICES - TENDANCE DES VENTES 7 JOURS');
-  lines.push(`Date d'extraction;${new Date().toLocaleString('fr-FR')}`);
-  lines.push('');
-  lines.push('Jour;Date;Chiffre d Affaires (FCFA);Marge Nette (FCFA);Rentabilite (%);Nombre de Ventes');
-
+  const dateStr = localDateKey(new Date());
+  const lines = [
+    'F.A.N.A MULTISERVICES - TENDANCES DES VENTES (DONNÉES ENREGISTRÉES)',
+    `Date d’extraction;${escapeCsv(new Date().toLocaleString('fr-CD'))}`,
+    'Devise du grand livre;CDF',
+    '',
+    'Jour;Date;Chiffre d’affaires (CDF);Marge (CDF);Rentabilité (%);Nombre de ventes',
+  ];
   trendData.forEach(item => {
     const rate = item.ca > 0 ? ((item.marge / item.ca) * 100).toFixed(1) : '0';
     lines.push([
-      escapeCsv(item.day),
-      escapeCsv(item.dateLabel),
-      toCsvNumber(item.ca),
-      toCsvNumber(item.marge),
-      escapeCsv(`${rate}%`),
-      item.nombreVentes,
+      escapeCsv(item.day), escapeCsv(item.dateLabel), toCsvNumber(item.ca),
+      toCsvNumber(item.marge), escapeCsv(`${rate}%`), item.nombreVentes,
     ].join(';'));
   });
-
-  const content = lines.join('\r\n');
-  downloadCsvFile(content, `FANA-Tendances-Ventes-7J-${dateStr}.csv`);
+  downloadCsvFile(lines.join('\r\n'), `FANA-Tendances-Ventes-7J-${dateStr}.csv`);
 }

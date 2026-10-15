@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Produit } from '../../types';
-import { formatFCFA, getDlcStatus } from '../../utils/format';
+import { formatMoney, getDlcStatus } from '../../utils/format';
 import { ProductModal } from './ProductModal';
 import { AddLotModal } from './AddLotModal';
 import { 
@@ -68,20 +68,18 @@ export const ProductsView: React.FC = () => {
     setIsProductModalOpen(true);
   };
 
-  const handleSaveProduct = (
+  const handleSaveProduct = async (
     data: Omit<Produit, 'id' | 'lots' | 'stock'>,
     initialLot?: { quantite: number; dlc: string; numeroLot: string }
   ) => {
-    if (productToEdit) {
-      updateProduct({
-        ...productToEdit,
-        ...data,
-      });
-    } else {
-      addProduct(data, initialLot);
+    const saved = productToEdit
+      ? await updateProduct({ ...productToEdit, ...data })
+      : await addProduct(data, initialLot);
+    if (saved) {
+      setIsProductModalOpen(false);
+      setProductToEdit(null);
     }
-    setIsProductModalOpen(false);
-    setProductToEdit(null);
+    return saved;
   };
 
   const toggleExpandLots = (id: string) => {
@@ -206,11 +204,11 @@ export const ProductsView: React.FC = () => {
                         {/* Name & EAN */}
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
-                            <img
-                              src={product.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=100&auto=format&fit=crop&q=80'}
-                              alt={product.nom}
-                              className="w-10 h-10 rounded-lg object-cover bg-slate-900 border border-slate-700 shrink-0"
-                            />
+                            {product.image ? (
+                              <img src={product.image} alt={product.nom} className="w-10 h-10 rounded-lg object-cover bg-slate-900 border border-slate-700 shrink-0" />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-700 shrink-0 flex items-center justify-center"><Package className="w-4 h-4 text-slate-600" /></div>
+                            )}
                             <div>
                               <div className="font-bold text-white text-xs sm:text-sm hover:text-orange-400 cursor-pointer">
                                 {product.nom}
@@ -231,12 +229,12 @@ export const ProductsView: React.FC = () => {
 
                         {/* Prix Achat */}
                         <td className="py-3 px-3 text-right font-mono text-slate-300">
-                          {formatFCFA(product.prixAchat)}
+                          {formatMoney(product.prixAchat)}
                         </td>
 
                         {/* Prix Vente */}
                         <td className="py-3 px-3 text-right font-mono font-bold text-orange-400">
-                          {formatFCFA(product.prixVente)}
+                          {formatMoney(product.prixVente)}
                           <span className="text-[10px] text-slate-400 block font-sans">
                             / {product.unite}
                           </span>
@@ -244,7 +242,7 @@ export const ProductsView: React.FC = () => {
 
                         {/* Marge Unitaire */}
                         <td className="py-3 px-3 text-right font-mono">
-                          <span className="font-bold text-emerald-400">+{formatFCFA(marge)}</span>
+                          <span className="font-bold text-emerald-400">+{formatMoney(marge)}</span>
                           <span className="text-[10px] text-slate-400 block">{tauxMarge}%</span>
                         </td>
 
@@ -421,9 +419,10 @@ export const ProductsView: React.FC = () => {
       {lotProductTarget && (
         <AddLotModal
           product={lotProductTarget}
-          onAddLot={lotData => {
-            addLotToProduct(lotProductTarget.id, lotData);
-            setLotProductTarget(null);
+          onAddLot={async lotData => {
+            const saved = await addLotToProduct(lotProductTarget.id, lotData);
+            if (saved) setLotProductTarget(null);
+            return saved;
           }}
           onClose={() => setLotProductTarget(null)}
         />
@@ -438,7 +437,7 @@ export const ProductsView: React.FC = () => {
               <p className="font-black text-sm uppercase">{printedTagProduct.nom}</p>
               <p className="text-[10px] text-gray-600">{printedTagProduct.rayon || printedTagProduct.categorie}</p>
               <div className="text-2xl font-black py-1 font-mono text-black">
-                {formatFCFA(printedTagProduct.prixVente)}
+                {formatMoney(printedTagProduct.prixVente)}
               </div>
               <div className="flex justify-center items-center gap-[2px] h-10 my-2">
                 {Array.from({ length: 30 }).map((_, i) => (

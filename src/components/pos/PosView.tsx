@@ -39,8 +39,9 @@ export const PosView: React.FC = () => {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [isParkedModalOpen, setIsParkedModalOpen] = useState<boolean>(false);
   const [isRecentSalesModalOpen, setIsRecentSalesModalOpen] = useState<boolean>(false);
+  const [paymentPreset, setPaymentPreset] = useState<PaymentMethod>('ESPECE');
 
-  const nextTicketNumber = `TICK-${1000 + sales.length + 1}`;
+  const ticketInProgress = 'Nouveau ticket';
 
   const handleSelectProduct = (product: Produit) => {
     addToCart(product, 1);
@@ -58,12 +59,13 @@ export const PosView: React.FC = () => {
   };
 
   const handleOpenPaymentModal = (presetMethod?: PaymentMethod) => {
+    setPaymentPreset(presetMethod || 'ESPECE');
     setIsPaymentModalOpen(true);
   };
 
-  const handleConfirmPayment = (method: PaymentMethod, receivedAmount?: number) => {
-    const sale = finalizeSale(method, receivedAmount);
-    setIsPaymentModalOpen(false);
+  const handleConfirmPayment = async (method: PaymentMethod, receivedAmount?: number, reference?: string, telephone?: string) => {
+    const sale = await finalizeSale(method, receivedAmount, reference, telephone);
+    if (sale) setIsPaymentModalOpen(false);
   };
 
   return (
@@ -93,7 +95,7 @@ export const PosView: React.FC = () => {
         parkedCount={parkedCarts.length}
         onOpenParkedModal={() => setIsParkedModalOpen(true)}
         onOpenRecentSales={() => setIsRecentSalesModalOpen(true)}
-        ticketNumber={nextTicketNumber}
+        ticketNumber={ticketInProgress}
       />
 
       {/* Modal: Weighing for KG / bulk items */}
@@ -113,6 +115,7 @@ export const PosView: React.FC = () => {
           clients={clients}
           onSelectClient={setSelectedClientId}
           onConfirmPayment={handleConfirmPayment}
+          initialMethod={paymentPreset}
           onClose={() => setIsPaymentModalOpen(false)}
         />
       )}
