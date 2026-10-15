@@ -1,7 +1,7 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { ApiRequest, ApiResponse } from './http';
-import { ApiError, parseCookies } from './http';
-import { ensureSchema } from './db';
+import { ApiError, parseCookies } from './http.js';
+import { ensureSchema } from './db.js';
 import type { AppUser } from '../../src/types';
 
 const COOKIE_NAME = 'fana_session';

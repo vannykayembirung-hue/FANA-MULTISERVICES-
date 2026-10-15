@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { ensureSchema } from '../_lib/db';
-import { ApiError, assertSameOrigin, getRequestBody, requireMethod, sendJson, withApiErrors } from '../_lib/http';
-import { createSession, hashPassword, normalizeEmail } from '../_lib/auth';
-import { consumeAuthRateLimit } from '../_lib/rateLimit';
+import { ensureSchema } from '../_lib/db.js';
+import { ApiError, assertSameOrigin, getRequestBody, requireMethod, sendJson, withApiErrors } from '../_lib/http.js';
+import { createSession, hashPassword, normalizeEmail } from '../_lib/auth.js';
+import { consumeAuthRateLimit } from '../_lib/rateLimit.js';
 
 export default withApiErrors(async (req, res) => {
   requireMethod(req, ['POST']);
