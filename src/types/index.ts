@@ -1,16 +1,32 @@
 export type UserRole = 'ADMIN' | 'GERANT' | 'CAISSIER';
-
+export type Currency = 'CDF' | 'USD';
 export type ProductUnit = 'PIECE' | 'KG' | 'LITRE' | 'SACHET' | 'CARTON';
+export type PaymentMethod = 'ESPECE' | 'MPESA' | 'ORANGE_MONEY' | 'AIRTEL_MONEY' | 'AFRIMONEY' | 'CREDIT';
 
-export type PaymentMethod = 'ESPECE' | 'WAVE' | 'ORANGE_MONEY' | 'CREDIT';
+export interface AppUser {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  name: string;
+  email: string;
+  role: UserRole;
+}
+
+export interface WorkspaceSettings {
+  currency: Currency;
+  /** Manually entered rate: Congolese francs per one US dollar. */
+  usdRate: number | null;
+}
 
 export interface Lot {
   id: string;
   produitId: string;
   numeroLot: string;
   quantite: number;
-  dlc: string; // ISO date YYYY-MM-DD
+  dlc: string;
   dateReception: string;
+  /** Unit acquisition cost captured when this batch is received (base CDF). */
+  prixAchat?: number;
 }
 
 export interface Produit {
@@ -24,13 +40,14 @@ export interface Produit {
   stockAlerte: number;
   unite: ProductUnit;
   rayon?: string;
+  /** Small, compressed data URL stored with this product in Neon. */
   image?: string;
   lots: Lot[];
 }
 
 export interface CartItem {
   produit: Produit;
-  quantite: number; // can be float for KG/Litre (e.g. 1.25)
+  quantite: number;
   prixUnitaire: number;
   remiseLigne?: number;
 }
@@ -41,6 +58,9 @@ export interface LigneVente {
   nomProduit: string;
   quantite: number;
   prixUnitaire: number;
+  coutUnitaire: number;
+  /** Exact COGS for the sold quantity; supports sales drawn from multiple FEFO lots. */
+  coutTotal?: number;
   totalLigne: number;
   unite: ProductUnit;
 }
@@ -59,6 +79,11 @@ export interface Vente {
   nomClient?: string;
   caissierId: string;
   nomCaissier: string;
+  nomMagasin: string;
+  devise: Currency;
+  tauxChange: number | null;
+  referencePaiement?: string;
+  telephonePaiement?: string;
   lignes: LigneVente[];
   margeEstimee: number;
 }
@@ -68,8 +93,8 @@ export interface Client {
   nom: string;
   telephone: string;
   adresse?: string;
-  credit: number; // Total dette actuelle
-  plafondCredit: number; // Plafond max autorisé
+  credit: number;
+  plafondCredit: number;
   historiquePaiements?: {
     id: string;
     date: string;
@@ -81,7 +106,7 @@ export interface Client {
 
 export interface ServiceTransaction {
   id: string;
-  nom: string; // Wave, Orange Money, Photocopie, Recharge, Woyofal, etc.
+  nom: string;
   type: 'DEPOT' | 'RETRAIT' | 'PRESTATION' | 'RECHARGE';
   montant: number;
   commission: number;
@@ -89,15 +114,28 @@ export interface ServiceTransaction {
   reference?: string;
   telephoneClient?: string;
   effectuePar: string;
+  devise?: Currency;
+  tauxChange?: number | null;
+}
+
+export type ServiceCatalogType = 'PRESTATION' | 'RECHARGE';
+
+export interface ServiceCatalogItem {
+  id: string;
+  nom: string;
+  type: ServiceCatalogType;
 }
 
 export interface MouvementCaisse {
   id: string;
+  sessionId: string;
   type: 'ENTREE' | 'SORTIE';
   motif: string;
   montant: number;
   date: string;
   responsable: string;
+  /** False for balance-sheet movements such as buying stock or paying supplier debt. */
+  impactBenefice?: boolean;
 }
 
 export interface CaisseSession {
@@ -109,13 +147,15 @@ export interface CaisseSession {
   ouvertPar: string;
   cloturePar?: string;
   totalEspecesAttendu: number;
-  totalWave: number;
+  totalMpesa: number;
   totalOrangeMoney: number;
+  totalAirtelMoney: number;
+  totalAfrimoney: number;
   totalCreditAccorde: number;
   totalEntreesDiverses: number;
   totalSortiesDiverses: number;
   montantReelCompte?: number;
-  ecartCaisse?: number; // reel - attendu
+  ecartCaisse?: number;
   notesCloture?: string;
 }
 
@@ -136,6 +176,7 @@ export interface BonReception {
   date: string;
   total: number;
   statutPaiement: 'PAYE' | 'A_CREDIT';
+  modePaiement?: Exclude<PaymentMethod, 'CREDIT'>;
   articles: {
     produitId: string;
     nomProduit: string;
@@ -147,9 +188,10 @@ export interface BonReception {
 }
 
 export interface FlotteSolde {
-  wave: number;
+  mpesa: number;
   orangeMoney: number;
-  woyofal: number;
+  airtelMoney: number;
+  afrimoney: number;
 }
 
 export interface ReglementFournisseur {
@@ -161,4 +203,13 @@ export interface ReglementFournisseur {
   mode: PaymentMethod;
   avecSortieCaisse: boolean;
   note?: string;
+}
+
+export interface ParkedCart {
+  id: string;
+  savedAt: string;
+  items: CartItem[];
+  clientId?: string;
+  clientName?: string;
+  discount: number;
 }

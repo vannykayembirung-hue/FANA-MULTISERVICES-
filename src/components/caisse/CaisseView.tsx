@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { formatFCFA, formatDateTime, formatCurrencyShort } from '../../utils/format';
+import { formatMoney, formatDateTime } from '../../utils/format';
 import { 
   Calculator, 
   ArrowUpRight, 
@@ -8,65 +8,83 @@ import {
   Lock, 
   Unlock, 
   Printer, 
-  AlertCircle, 
-  CheckCircle2, 
-  Clock, 
-  FileCheck2, 
+  Clock,
+  FileCheck2,
   X,
-  Banknote,
-  DollarSign
 } from 'lucide-react';
 
 export const CaisseView: React.FC = () => {
   const {
     caisseSession,
     mouvementsCaisse,
+    cashMovements,
+    cashSessions,
     addMouvementCaisse,
     openCaisse,
     closeCaisse,
     userName,
+    displayCurrency,
+    toBaseAmount,
+    settings,
+    isSaving,
   } = useApp();
 
   // Modals & form state
   const [isMouvementModalOpen, setIsMouvementModalOpen] = useState<boolean>(false);
   const [mvtType, setMvtType] = useState<'ENTREE' | 'SORTIE'>('SORTIE');
   const [mvtMotif, setMvtMotif] = useState<string>('');
-  const [mvtMontant, setMvtMontant] = useState<number>(5000);
+  const [mvtMontant, setMvtMontant] = useState<string>('');
 
   const [isClotureModalOpen, setIsClotureModalOpen] = useState<boolean>(false);
-  const [compteReelStr, setCompteReelStr] = useState<string>(
-    caisseSession.totalEspecesAttendu.toString()
-  );
+  const [compteReelStr, setCompteReelStr] = useState<string>('');
   const [notesCloture, setNotesCloture] = useState<string>('');
 
   const [isOpeningModalOpen, setIsOpeningModalOpen] = useState<boolean>(false);
-  const [fondOuvertureStr, setFondOuvertureStr] = useState<string>('50000');
+  const [fondOuvertureStr, setFondOuvertureStr] = useState<string>('');
 
   const [showTicketZModal, setShowTicketZModal] = useState<boolean>(false);
+  const [movementHistoryScope, setMovementHistoryScope] = useState<'SESSION' | 'ALL'>('SESSION');
+  const displayedCashMovements = useMemo(() => {
+    const movements = movementHistoryScope === 'ALL' ? cashMovements : mouvementsCaisse;
+    return [...movements].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [cashMovements, mouvementsCaisse, movementHistoryScope]);
+  const cashSessionById = useMemo(() => new Map(cashSessions.map(session => [session.id, session])), [cashSessions]);
 
-  const compteReelNum = parseFloat(compteReelStr) || 0;
-  const ecartCaisse = compteReelNum - caisseSession.totalEspecesAttendu;
+  const compteReelNum = compteReelStr.trim() === '' ? null : Number(compteReelStr);
+  const compteReelCdf = (() => {
+    if (compteReelNum === null || !Number.isFinite(compteReelNum)) return null;
+    try { return toBaseAmount(compteReelNum); } catch { return null; }
+  })();
+  const ecartCaisse = compteReelCdf === null ? null : compteReelCdf - caisseSession.totalEspecesAttendu;
 
-  const handleSaveMouvement = (e: React.FormEvent) => {
+  const handleSaveMouvement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mvtMontant <= 0 || !mvtMotif) return;
-    addMouvementCaisse(mvtType, mvtMotif, mvtMontant);
+    const enteredAmount = Number(mvtMontant);
+    if (!Number.isFinite(enteredAmount) || enteredAmount <= 0 || !mvtMotif.trim()) return;
+    let amountCdf: number;
+    try { amountCdf = toBaseAmount(enteredAmount); } catch { return; }
+    const saved = await addMouvementCaisse(mvtType, mvtMotif.trim(), amountCdf);
+    if (!saved) return;
     setIsMouvementModalOpen(false);
     setMvtMotif('');
+    setMvtMontant('');
   };
 
-  const handleConfirmCloture = (e: React.FormEvent) => {
+  const handleConfirmCloture = async (e: React.FormEvent) => {
     e.preventDefault();
-    closeCaisse(compteReelNum, notesCloture);
+    if (compteReelCdf === null || compteReelCdf < 0) return;
+    const closed = await closeCaisse(compteReelCdf, notesCloture.trim());
+    if (!closed) return;
     setIsClotureModalOpen(false);
     setShowTicketZModal(true);
   };
 
-  const handleConfirmOpening = (e: React.FormEvent) => {
+  const handleConfirmOpening = async (e: React.FormEvent) => {
     e.preventDefault();
-    const val = parseFloat(fondOuvertureStr) || 0;
-    openCaisse(val);
-    setIsOpeningModalOpen(false);
+    let openingAmount: number;
+    try { openingAmount = toBaseAmount(Number(fondOuvertureStr) || 0); } catch { return; }
+    const opened = await openCaisse(openingAmount);
+    if (opened) setIsOpeningModalOpen(false);
   };
 
   return (
@@ -87,7 +105,7 @@ export const CaisseView: React.FC = () => {
             </span>
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Contrôle des flux d'espèces, décaissements, calcul automatique de l'écart et ticket Z officiel.
+            Suivi des encaissements en espèces, des mouvements de caisse et du comptage de clôture.
           </p>
         </div>
 
@@ -106,7 +124,8 @@ export const CaisseView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setCompteReelStr(caisseSession.totalEspecesAttendu.toString());
+                  setCompteReelStr('');
+                  setNotesCloture('');
                   setIsClotureModalOpen(true);
                 }}
                 className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-red-600/20 transition-all"
@@ -139,115 +158,67 @@ export const CaisseView: React.FC = () => {
         </div>
       </div>
 
-      {/* Cash Drawer Status Card & Key Numbers */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Cash Expected */}
-        <div className="p-4 rounded-2xl bg-slate-850 border border-slate-750 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
-            Espèces Théoriques Attendues
-          </span>
-          <div className="text-2xl font-black text-emerald-400 font-mono mt-2">
-            {formatFCFA(caisseSession.totalEspecesAttendu)}
-          </div>
-          <span className="text-[11px] text-slate-400 mt-1">
-            Fond ({formatCurrencyShort(caisseSession.fondOuverture)}) + Ventes + Entrées - Sorties
-          </span>
-        </div>
-
-        {/* Total Wave */}
-        <div className="p-4 rounded-2xl bg-slate-850 border border-slate-750 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
-            Paiements Wave
-          </span>
-          <div className="text-2xl font-black text-sky-400 font-mono mt-2">
-            {formatFCFA(caisseSession.totalWave)}
-          </div>
-          <span className="text-[11px] text-slate-400 mt-1">Sur compte marchand FANA</span>
-        </div>
-
-        {/* Total Orange Money */}
-        <div className="p-4 rounded-2xl bg-slate-850 border border-slate-750 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
-            Paiements Orange Money
-          </span>
-          <div className="text-2xl font-black text-orange-400 font-mono mt-2">
-            {formatFCFA(caisseSession.totalOrangeMoney)}
-          </div>
-          <span className="text-[11px] text-slate-400 mt-1">Code marchand OM #144#</span>
-        </div>
-
-        {/* Total Crédit accordé */}
-        <div className="p-4 rounded-2xl bg-slate-850 border border-slate-750 flex flex-col justify-between">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
-            Ventes à Crédit (Ardoises)
-          </span>
-          <div className="text-2xl font-black text-amber-400 font-mono mt-2">
-            {formatFCFA(caisseSession.totalCreditAccorde)}
-          </div>
-          <span className="text-[11px] text-slate-400 mt-1">Ajoutées aux comptes clients</span>
-        </div>
+      {/* Cash drawer totals: calculated from recorded transactions only */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        {[
+          { label: 'Espèces attendues', value: caisseSession.totalEspecesAttendu, color: 'text-emerald-400', note: 'Fond initial + mouvements enregistrés' },
+          { label: 'M-Pesa enregistré', value: caisseSession.totalMpesa, color: 'text-red-300', note: 'Ventes enregistrées avec ce mode' },
+          { label: 'Orange Money enregistré', value: caisseSession.totalOrangeMoney, color: 'text-orange-400', note: 'Ventes enregistrées avec ce mode' },
+          { label: 'Airtel Money enregistré', value: caisseSession.totalAirtelMoney, color: 'text-red-400', note: 'Ventes enregistrées avec ce mode' },
+          { label: 'Afrimoney enregistré', value: caisseSession.totalAfrimoney, color: 'text-violet-300', note: 'Ventes enregistrées avec ce mode' },
+          { label: 'Crédit client', value: caisseSession.totalCreditAccorde, color: 'text-amber-400', note: 'Montants ajoutés aux comptes clients' },
+        ].map(card => <div key={card.label} className="flex flex-col justify-between rounded-2xl border border-slate-750 bg-slate-850 p-4">
+          <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">{card.label}</span>
+          <div className={`mt-2 font-mono text-2xl font-black ${card.color}`}>{formatMoney(card.value)}</div>
+          <span className="mt-1 text-[11px] text-slate-400">{card.note}</span>
+        </div>)}
       </div>
 
-      {/* Movements Table (Entrées & Sorties de caisse) */}
-      <div className="p-5 bg-slate-850 border border-slate-750 rounded-2xl space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+      {/* Cash movement history from persisted records */}
+      <div className="space-y-4 rounded-2xl border border-slate-750 bg-slate-850 p-5">
+        <div className="flex flex-col gap-3 border-b border-slate-800 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
-            <Calculator className="w-5 h-5 text-slate-400" />
-            <h3 className="font-bold text-white text-base">Mouvements Exceptionnels de Caisse</h3>
+            <Calculator className="h-5 w-5 text-slate-400" />
+            <div>
+              <h3 className="text-base font-bold text-white">Historique des mouvements de caisse</h3>
+              <p className="mt-0.5 text-[11px] text-slate-500">Entrées et sorties d’espèces enregistrées, classées par date.</p>
+            </div>
           </div>
-          <span className="text-xs text-slate-400 font-mono">
-            {mouvementsCaisse.length} mouvement(s)
-          </span>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-slate-700 bg-slate-950 p-1" role="group" aria-label="Période de l’historique">
+              <button type="button" onClick={() => setMovementHistoryScope('SESSION')} aria-pressed={movementHistoryScope === 'SESSION'} className={`rounded-md px-2.5 py-1.5 text-[11px] font-semibold ${movementHistoryScope === 'SESSION' ? 'bg-orange-500 text-white' : 'text-slate-400 hover:text-white'}`}>Session actuelle</button>
+              <button type="button" onClick={() => setMovementHistoryScope('ALL')} aria-pressed={movementHistoryScope === 'ALL'} className={`rounded-md px-2.5 py-1.5 text-[11px] font-semibold ${movementHistoryScope === 'ALL' ? 'bg-orange-500 text-white' : 'text-slate-400 hover:text-white'}`}>Tout l’historique</button>
+            </div>
+            <span className="whitespace-nowrap font-mono text-xs text-slate-400">{displayedCashMovements.length} mouvement(s)</span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-750">
+          <table className="w-full min-w-[760px] text-left text-xs">
+            <thead className="border-b border-slate-750 bg-slate-950 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               <tr>
-                <th className="py-2.5 px-3">Date / Heure</th>
-                <th className="py-2.5 px-3">Type</th>
-                <th className="py-2.5 px-3">Motif du Mouvement</th>
-                <th className="py-2.5 px-3">Responsable</th>
-                <th className="py-2.5 px-3 text-right">Montant</th>
+                <th className="px-3 py-2.5">Date / Heure</th>
+                <th className="px-3 py-2.5">Session</th>
+                <th className="px-3 py-2.5">Type</th>
+                <th className="px-3 py-2.5">Motif du mouvement</th>
+                <th className="px-3 py-2.5">Responsable</th>
+                <th className="px-3 py-2.5 text-right">Montant</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {mouvementsCaisse.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500">
-                    Aucune entrée ou sortie d'espèces exceptionnelle sur cette session.
-                  </td>
-                </tr>
-              ) : (
-                mouvementsCaisse.map(mvt => (
-                  <tr key={mvt.id} className="hover:bg-slate-800/40">
-                    <td className="py-2.5 px-3 text-slate-400 font-mono text-[11px]">
-                      {formatDateTime(mvt.date)}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-bold ${
-                          mvt.type === 'ENTREE'
-                            ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-800'
-                            : 'bg-red-950/70 text-red-300 border border-red-800'
-                        }`}
-                      >
-                        {mvt.type === 'ENTREE' ? '+ Entrée Espèces' : '- Sortie Caisse'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 font-semibold text-slate-200">{mvt.motif}</td>
-                    <td className="py-2.5 px-3 text-slate-400">{mvt.responsable}</td>
-                    <td
-                      className={`py-2.5 px-3 text-right font-mono font-bold ${
-                        mvt.type === 'ENTREE' ? 'text-emerald-400' : 'text-red-400'
-                      }`}
-                    >
-                      {mvt.type === 'ENTREE' ? '+' : '-'}
-                      {formatFCFA(mvt.montant)}
-                    </td>
-                  </tr>
-                ))
-              )}
+              {displayedCashMovements.length === 0 ? (
+                <tr><td colSpan={6} className="py-8 text-center text-slate-500">Aucun mouvement d’espèces n’est enregistré pour cette période.</td></tr>
+              ) : displayedCashMovements.map(movement => {
+                const session = cashSessionById.get(movement.sessionId);
+                return <tr key={movement.id} className="hover:bg-slate-800/40">
+                  <td className="px-3 py-2.5 font-mono text-[11px] text-slate-400">{formatDateTime(movement.date)}</td>
+                  <td className="px-3 py-2.5 text-[11px] text-slate-400">{session ? formatDateTime(session.dateOuverture) : 'Session inconnue'}</td>
+                  <td className="px-3 py-2.5"><span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${movement.type === 'ENTREE' ? 'border-emerald-800 bg-emerald-950/70 text-emerald-300' : 'border-red-800 bg-red-950/70 text-red-300'}`}>{movement.type === 'ENTREE' ? '+ Entrée espèces' : '− Sortie caisse'}</span></td>
+                  <td className="px-3 py-2.5 font-semibold text-slate-200">{movement.motif}</td>
+                  <td className="px-3 py-2.5 text-slate-400">{movement.responsable}</td>
+                  <td className={`px-3 py-2.5 text-right font-mono font-bold ${movement.type === 'ENTREE' ? 'text-emerald-400' : 'text-red-400'}`}>{movement.type === 'ENTREE' ? '+' : '−'}{formatMoney(movement.montant)}</td>
+                </tr>;
+              })}
             </tbody>
           </table>
         </div>
@@ -309,13 +280,14 @@ export const CaisseView: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-300 font-semibold block">Montant en FCFA *</label>
+                <label className="text-slate-300 font-semibold block">Montant en {displayCurrency} *</label>
                 <input
                   type="number"
-                  min="100"
+                  min="0.01"
+                  step="any"
                   required
                   value={mvtMontant}
-                  onChange={e => setMvtMontant(parseFloat(e.target.value) || 0)}
+                  onChange={e => setMvtMontant(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-base font-bold"
                 />
               </div>
@@ -330,7 +302,8 @@ export const CaisseView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold"
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold disabled:opacity-50"
                 >
                   Valider le mouvement
                 </button>
@@ -361,17 +334,18 @@ export const CaisseView: React.FC = () => {
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center">
                 <span className="text-slate-400 font-medium">Espèces Théoriques Attendues :</span>
                 <span className="text-xl font-black text-emerald-400 font-mono">
-                  {formatFCFA(caisseSession.totalEspecesAttendu)}
+                  {formatMoney(caisseSession.totalEspecesAttendu)}
                 </span>
               </div>
 
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold block">
-                  Comptage Physique Réel du Tiroir (Billets &amp; Pièces) *
+                  Comptage Physique Réel du Tiroir ({displayCurrency}) *
                 </label>
                 <input
                   type="number"
                   min="0"
+                  step={displayCurrency === 'USD' ? '0.01' : '1'}
                   required
                   value={compteReelStr}
                   onChange={e => setCompteReelStr(e.target.value)}
@@ -380,29 +354,25 @@ export const CaisseView: React.FC = () => {
               </div>
 
               {/* Écart de caisse auto-calculation */}
-              <div
-                className={`p-3.5 rounded-xl border flex items-center justify-between ${
-                  ecartCaisse === 0
-                    ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-                    : ecartCaisse > 0
-                    ? 'bg-sky-950/60 border-sky-800 text-sky-300'
-                    : 'bg-red-950/70 border-red-800 text-red-300'
-                }`}
-              >
+              <div className={`flex items-center justify-between rounded-xl border p-3.5 ${
+                ecartCaisse === null ? 'border-slate-800 bg-slate-950 text-slate-300'
+                  : ecartCaisse === 0 ? 'border-emerald-800 bg-emerald-950/60 text-emerald-300'
+                    : ecartCaisse > 0 ? 'border-sky-800 bg-sky-950/60 text-sky-300'
+                      : 'border-red-800 bg-red-950/70 text-red-300'
+              }`}>
                 <div>
-                  <span className="font-bold block">
-                    {ecartCaisse === 0
-                      ? 'Caisse Parfaite (Aucun Écart)'
-                      : ecartCaisse > 0
-                      ? 'Excédent de Caisse (+)'
-                      : 'Déficit / Manquant de Caisse (-)'}
+                  <span className="block font-bold">
+                    {ecartCaisse === null ? 'Écart non calculé'
+                      : ecartCaisse === 0 ? 'Aucun écart constaté'
+                        : ecartCaisse > 0 ? 'Excédent de caisse (+)' : 'Déficit / manquant de caisse (−)'}
                   </span>
                   <span className="text-[10px]">
-                    {ecartCaisse < 0 ? 'À justifier obligatoirement' : 'Conforme'}
+                    {ecartCaisse === null ? 'Saisissez le montant réellement compté.'
+                      : ecartCaisse < 0 ? 'Écart à justifier' : 'Comptage enregistré'}
                   </span>
                 </div>
-                <div className="text-xl font-black font-mono">
-                  {ecartCaisse > 0 ? `+${formatFCFA(ecartCaisse)}` : formatFCFA(ecartCaisse)}
+                <div className="font-mono text-xl font-black">
+                  {ecartCaisse === null ? '—' : ecartCaisse > 0 ? `+${formatMoney(ecartCaisse)}` : formatMoney(ecartCaisse)}
                 </div>
               </div>
 
@@ -427,7 +397,8 @@ export const CaisseView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-red-600/20"
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-red-600/20 disabled:opacity-50"
                 >
                   <Lock className="w-4 h-4" />
                   <span>Confirmer la Clôture Z</span>
@@ -455,12 +426,12 @@ export const CaisseView: React.FC = () => {
             <form onSubmit={handleConfirmOpening} className="p-4 space-y-4 text-xs">
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold block">
-                  Fond de caisse initial (FCFA) *
+                  Fond de caisse initial ({displayCurrency}) *
                 </label>
                 <input
                   type="number"
                   min="0"
-                  step="5000"
+                  step={displayCurrency === 'USD' ? '0.01' : '1'}
                   required
                   value={fondOuvertureStr}
                   onChange={e => setFondOuvertureStr(e.target.value)}
@@ -478,7 +449,8 @@ export const CaisseView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5"
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <Unlock className="w-4 h-4" />
                   <span>Ouvrir la session</span>
@@ -512,10 +484,9 @@ export const CaisseView: React.FC = () => {
                 className="w-[300px] bg-white text-black p-4 rounded-md shadow-lg font-mono text-xs leading-relaxed"
               >
                 <div className="text-center border-b border-dashed border-gray-400 pb-2 mb-2">
-                  <h2 className="text-sm font-black">*** TICKET Z DU JOUR ***</h2>
-                  <p className="text-xs font-bold">F.A.N.A MULTISERVICES</p>
-                  <p className="text-[10px]">Cité Fadia, Dakar</p>
-                  <p className="text-[9px]">CLÔTURE OFFICIELLE DE CAISSE</p>
+                  <h2 className="text-sm font-black">*** RAPPORT DE CLÔTURE DE CAISSE ***</h2>
+                  <p className="text-xs font-bold">{settings.organizationName}</p>
+                  <p className="text-[9px]">Récapitulatif interne des données enregistrées</p>
                 </div>
 
                 <div className="space-y-1 text-[10px] border-b border-dashed border-gray-400 pb-2 mb-2">
@@ -536,42 +507,33 @@ export const CaisseView: React.FC = () => {
                 </div>
 
                 <div className="space-y-1 text-[10px] border-b border-dashed border-gray-400 pb-2 mb-2">
-                  <div className="flex justify-between">
-                    <span>Fond de caisse :</span>
-                    <span>{caisseSession.fondOuverture} F</span>
+                  <div className="flex justify-between gap-2">
+                    <span>Fond de caisse :</span><span>{formatMoney(caisseSession.fondOuverture)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Total Ventes Espèces :</span>
-                    <span>{caisseSession.totalEspecesAttendu - caisseSession.fondOuverture} F</span>
+                  <div className="flex justify-between gap-2">
+                    <span>Espèces nettes enregistrées :</span><span>{formatMoney(caisseSession.totalEspecesAttendu - caisseSession.fondOuverture)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Total Wave :</span>
-                    <span>{caisseSession.totalWave} F</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Total Orange Money :</span>
-                    <span>{caisseSession.totalOrangeMoney} F</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Total Crédit (Ardoises) :</span>
-                    <span>{caisseSession.totalCreditAccorde} F</span>
-                  </div>
+                  <div className="flex justify-between gap-2"><span>Total M-Pesa :</span><span>{formatMoney(caisseSession.totalMpesa)}</span></div>
+                  <div className="flex justify-between gap-2"><span>Total Orange Money :</span><span>{formatMoney(caisseSession.totalOrangeMoney)}</span></div>
+                  <div className="flex justify-between gap-2"><span>Total Airtel Money :</span><span>{formatMoney(caisseSession.totalAirtelMoney)}</span></div>
+                  <div className="flex justify-between gap-2"><span>Total Afrimoney :</span><span>{formatMoney(caisseSession.totalAfrimoney)}</span></div>
+                  <div className="flex justify-between gap-2"><span>Total Crédit client :</span><span>{formatMoney(caisseSession.totalCreditAccorde)}</span></div>
                 </div>
 
                 <div className="space-y-1 text-[10px] border-b border-dashed border-gray-400 pb-2 mb-2 font-bold">
                   <div className="flex justify-between">
                     <span>Espèces Théoriques :</span>
-                    <span>{caisseSession.totalEspecesAttendu} F</span>
+                    <span>{formatMoney(caisseSession.totalEspecesAttendu)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Comptage Réel :</span>
-                    <span>{caisseSession.montantReelCompte ?? caisseSession.totalEspecesAttendu} F</span>
+                    <span>{formatMoney(caisseSession.montantReelCompte ?? caisseSession.totalEspecesAttendu)}</span>
                   </div>
                   <div className="flex justify-between text-xs pt-1 border-t border-gray-300">
                     <span>ÉCART DE CAISSE :</span>
                     <span>
                       {(caisseSession.ecartCaisse ?? 0) >= 0 ? '+' : ''}
-                      {caisseSession.ecartCaisse ?? 0} F
+                      {formatMoney(caisseSession.ecartCaisse ?? 0)}
                     </span>
                   </div>
                 </div>

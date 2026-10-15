@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatFCFA } from '../../utils/format';
+import { formatMoney } from '../../utils/format';
 import { Clock, Play, Trash2, X, ShoppingBag } from 'lucide-react';
 
 interface ParkedCartItem {
@@ -74,7 +74,7 @@ export const ParkedCartsModal: React.FC<ParkedCartsModalProps> = ({
                       {cart.items.map(it => `${it.produit.nom} (x${it.quantite})`).join(', ')}
                     </p>
                     <div className="text-sm font-extrabold text-white font-mono">
-                      {formatFCFA(total)}
+                      {formatMoney(total)}
                     </div>
                   </div>
 

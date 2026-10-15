@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { hardwareScanner, ScannerStatus, ScannerInterface } from '../../utils/hardwareScanner';
-import { Produit } from '../../types';
 import { 
   Barcode, 
   Usb, 
@@ -9,26 +8,17 @@ import {
   Check, 
   X, 
   AlertCircle, 
-  Radio, 
-  Zap, 
-  Settings2,
-  RefreshCw,
-  Sparkles
+  Radio,
 } from 'lucide-react';
 import { posAudio } from '../../utils/audio';
 
 interface HardwareScannerModalProps {
-  products: Produit[];
   onBarcodeDetected: (barcode: string, source: ScannerInterface) => void;
   onClose: () => void;
 }
 
-export const HardwareScannerModal: React.FC<HardwareScannerModalProps> = ({
-  products,
-  onBarcodeDetected,
-  onClose,
-}) => {
-  const [activeTab, setActiveTab] = useState<'SERIAL' | 'HID' | 'WEDGE' | 'SIMULATOR'>('SERIAL');
+export const HardwareScannerModal: React.FC<HardwareScannerModalProps> = ({ onBarcodeDetected, onClose }) => {
+  const [activeTab, setActiveTab] = useState<'SERIAL' | 'HID' | 'WEDGE'>('SERIAL');
   const [status, setStatus] = useState<ScannerStatus>(hardwareScanner.getStatus());
   const [baudRate, setBaudRate] = useState<number>(9600);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -145,7 +135,7 @@ export const HardwareScannerModal: React.FC<HardwareScannerModalProps> = ({
         )}
 
         {/* Tab Navigation */}
-        <div className="grid grid-cols-4 p-1.5 bg-slate-950 border-b border-slate-800 gap-1 text-xs">
+        <div className="grid grid-cols-3 p-1.5 bg-slate-950 border-b border-slate-800 gap-1 text-xs">
           <button
             type="button"
             onClick={() => setActiveTab('SERIAL')}
@@ -185,18 +175,6 @@ export const HardwareScannerModal: React.FC<HardwareScannerModalProps> = ({
             <span>Douchette USB</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('SIMULATOR')}
-            className={`py-2 px-2 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all ${
-              activeTab === 'SIMULATOR'
-                ? 'bg-orange-500 text-white shadow-xs'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Test Express</span>
-          </button>
         </div>
 
         {/* Tab Body */}
@@ -332,7 +310,7 @@ export const HardwareScannerModal: React.FC<HardwareScannerModalProps> = ({
                   <span className="font-bold text-white text-xs">Écoute Globale Active (Plug &amp; Play)</span>
                 </div>
                 <p className="text-slate-400 text-[11px] leading-relaxed">
-                  95% des douchettes USB de supermarché fonctionnent immédiatement en émulation clavier : vous pouvez pointer le scanner sur n'importe quel code-barre sans même cliquer sur l'écran.
+                  En mode clavier (USB HID wedge), le lecteur transmet le code comme une saisie clavier puis termine généralement par Entrée. La détection des séquences rapides est active sur l’écran de vente.
                 </p>
               </div>
 
@@ -349,37 +327,6 @@ export const HardwareScannerModal: React.FC<HardwareScannerModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: SIMULATOR / FAST SCAN TEST */}
-          {activeTab === 'SIMULATOR' && (
-            <div className="space-y-3">
-              <p className="text-slate-300 text-xs">
-                Cliquez sur un article ci-dessous pour simuler un scan physique ultra-rapide au millième de seconde :
-              </p>
-              <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
-                {products.slice(0, 10).map(p => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      posAudio.playBeep();
-                      onBarcodeDetected(p.ean, 'SERIAL');
-                    }}
-                    className="p-2.5 bg-slate-950 hover:bg-orange-500/20 hover:border-orange-500/80 border border-slate-800 rounded-xl text-left transition-all flex items-center justify-between group"
-                  >
-                    <div className="min-w-0 pr-1">
-                      <div className="font-semibold text-white text-xs truncate group-hover:text-orange-300">
-                        {p.nom}
-                      </div>
-                      <div className="font-mono text-[10px] text-slate-400">{p.ean}</div>
-                    </div>
-                    <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono font-bold text-orange-400 shrink-0">
-                      SCAN
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Footer */}

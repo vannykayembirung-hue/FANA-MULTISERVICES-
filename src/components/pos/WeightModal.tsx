@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Produit } from '../../types';
-import { formatFCFA } from '../../utils/format';
+import { formatMoney } from '../../utils/format';
 import { Scale, Check, X } from 'lucide-react';
 
 interface WeightModalProps {
@@ -66,7 +66,7 @@ export const WeightModal: React.FC<WeightModalProps> = ({ product, onConfirm, on
             <div>
               <h3 className="font-bold text-white text-base leading-tight">{product.nom}</h3>
               <p className="text-xs text-slate-400">
-                Prix au {product.unite} : <span className="font-semibold text-orange-400">{formatFCFA(product.prixVente)}</span>
+                Prix au {product.unite} : <span className="font-semibold text-orange-400">{formatMoney(product.prixVente)}</span>
               </p>
             </div>
           </div>
@@ -92,7 +92,7 @@ export const WeightModal: React.FC<WeightModalProps> = ({ product, onConfirm, on
               <span className="text-lg font-semibold text-orange-400 uppercase">{product.unite}</span>
             </div>
             <div className="text-2xl font-bold text-emerald-400 font-mono">
-              {formatFCFA(totalPrice)}
+              {formatMoney(totalPrice)}
             </div>
           </div>
         </div>
@@ -147,7 +147,7 @@ export const WeightModal: React.FC<WeightModalProps> = ({ product, onConfirm, on
             className="flex-1 py-3.5 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:opacity-50 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20 transition-all"
           >
             <Check className="w-5 h-5" />
-            Ajouter au panier ({formatFCFA(totalPrice)})
+            Ajouter au panier ({formatMoney(totalPrice)})
           </button>
         </div>
       </div>

@@ -1,20 +1,19 @@
 import React, { useState } from 'react';
 import { CartItem, Client, PaymentMethod } from '../../types';
-import { formatFCFA, formatCurrencyShort } from '../../utils/format';
-import { 
-  ShoppingBag, 
-  Trash2, 
-  Plus, 
-  Minus, 
-  User, 
-  Tag, 
-  Clock, 
+import { formatMoney, formatCurrencyShort } from '../../utils/format';
+import { useApp } from '../../context/AppContext';
+import {
+  ShoppingBag,
+  Trash2,
+  Plus,
+  Minus,
+  User,
+  Tag,
+  Clock,
   ChevronRight,
-  AlertCircle,
-  CreditCard,
   Banknote,
   BookOpen,
-  Receipt
+  Receipt,
 } from 'lucide-react';
 
 interface CartSidebarProps {
@@ -56,6 +55,8 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
   onOpenRecentSales,
   ticketNumber,
 }) => {
+  const { toBaseAmount, displayCurrency, caisseSession, isSaving } = useApp();
+  const canCheckout = caisseSession.statut === 'OUVERTE' && !isSaving;
   const [showDiscountInput, setShowDiscountInput] = useState<boolean>(false);
   const [customDiscountValue, setCustomDiscountValue] = useState<string>('');
   const [discountType, setDiscountType] = useState<'FIXED' | 'PERCENT'>('FIXED');
@@ -68,7 +69,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
       const computed = Math.round((cartTotalBrut * val) / 100);
       onSetDiscount(computed);
     } else {
-      onSetDiscount(val);
+      try { onSetDiscount(toBaseAmount(val)); } catch { /* configuration message is shown by the currency settings */ }
     }
     setShowDiscountInput(false);
   };
@@ -131,6 +132,12 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
           )}
         </div>
       </div>
+
+      {caisseSession.statut !== 'OUVERTE' && (
+        <div role="status" className="border-b border-amber-800/60 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
+          Ouvrez une session dans l’onglet Caisse avant d’encaisser une vente.
+        </div>
+      )}
 
       {/* Client Quick Picker Bar */}
       <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between text-xs">
@@ -297,7 +304,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
             <div className="flex gap-2">
               <input
                 type="number"
-                placeholder={discountType === 'FIXED' ? 'Montant en FCFA' : 'Pourcentage %'}
+                placeholder={discountType === 'FIXED' ? `Montant en ${displayCurrency}` : 'Pourcentage %'}
                 value={customDiscountValue}
                 onChange={e => setCustomDiscountValue(e.target.value)}
                 className="flex-1 px-2.5 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-xs focus:outline-hidden focus:border-orange-500"
@@ -311,7 +318,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
                     discountType === 'FIXED' ? 'bg-orange-500 text-white' : 'bg-slate-800 text-slate-400'
                   }`}
                 >
-                  F
+                  {displayCurrency}
                 </button>
                 <button
                   type="button"
@@ -338,7 +345,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
           <div className="flex items-center justify-between text-slate-400">
             <span>Sous-total brut</span>
             <span className="font-mono font-medium text-slate-200">
-              {formatFCFA(cartTotalBrut)}
+              {formatMoney(cartTotalBrut)}
             </span>
           </div>
 
@@ -349,7 +356,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
               className="text-orange-400 hover:text-orange-300 font-semibold flex items-center gap-1 text-xs"
             >
               <Tag className="w-3 h-3" />
-              {cartDiscount > 0 ? `Remise accordée (-${cartDiscount} F)` : '+ Ajouter une Remise'}
+              {cartDiscount > 0 ? `Remise accordée (-${formatCurrencyShort(cartDiscount)})` : '+ Ajouter une Remise'}
             </button>
             {cartDiscount > 0 && (
               <span className="font-mono font-bold text-red-400">
@@ -366,7 +373,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
               <span className="text-[10px] text-slate-500">Toutes taxes comprises</span>
             </div>
             <span className="text-2xl font-black text-white font-mono tracking-tight">
-              {formatFCFA(cartTotalNet)}
+              {formatMoney(cartTotalNet)}
             </span>
           </div>
         </div>
@@ -375,7 +382,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
         <div className="grid grid-cols-4 gap-1.5 pt-1">
           <button
             type="button"
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || !canCheckout}
             onClick={() => onOpenPaymentModal('ESPECE')}
             className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-emerald-950/60 hover:border-emerald-700/80 border border-slate-750 text-slate-200 hover:text-emerald-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
           >
@@ -385,19 +392,17 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
 
           <button
             type="button"
-            disabled={cart.length === 0}
-            onClick={() => onOpenPaymentModal('WAVE')}
-            className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-sky-950/60 hover:border-sky-700/80 border border-slate-750 text-slate-200 hover:text-sky-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
+            disabled={cart.length === 0 || !canCheckout}
+            onClick={() => onOpenPaymentModal('MPESA')}
+            className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-red-950/60 hover:border-red-700/80 border border-slate-750 text-slate-200 hover:text-red-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
           >
-            <div className="w-4 h-4 rounded-full bg-sky-500 text-white font-extrabold text-[9px] flex items-center justify-center">
-              W
-            </div>
-            <span>Wave</span>
+            <div className="w-4 h-4 rounded-full bg-red-600 text-white font-extrabold text-[8px] flex items-center justify-center">M</div>
+            <span>M-Pesa</span>
           </button>
 
           <button
             type="button"
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || !canCheckout}
             onClick={() => onOpenPaymentModal('ORANGE_MONEY')}
             className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-orange-950/60 hover:border-orange-700/80 border border-slate-750 text-slate-200 hover:text-orange-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
           >
@@ -409,7 +414,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
 
           <button
             type="button"
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || !canCheckout}
             onClick={() => onOpenPaymentModal('CREDIT')}
             className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-amber-950/60 hover:border-amber-700/80 border border-slate-750 text-slate-200 hover:text-amber-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
           >
@@ -422,7 +427,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
         <div className="flex items-center gap-2 pt-1">
           <button
             type="button"
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || isSaving}
             onClick={onParkCart}
             className="px-3 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-750 disabled:opacity-40 text-slate-300 font-semibold text-xs border border-slate-700 flex items-center justify-center transition-colors shrink-0"
             title="Mettre en attente ce ticket pour servir un autre client"
@@ -432,7 +437,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
 
           <button
             type="button"
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || !canCheckout}
             onClick={() => onOpenPaymentModal()}
             className="flex-1 py-3.5 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-orange-500/25 transition-all"
           >

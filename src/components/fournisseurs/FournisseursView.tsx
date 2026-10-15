@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Fournisseur, Produit, PaymentMethod } from '../../types';
-import { formatFCFA, formatDateTime, formatCurrencyShort } from '../../utils/format';
+import { formatMoney, formatDateTime, formatCurrencyShort } from '../../utils/format';
 import { 
   Truck, 
   Plus, 
@@ -29,131 +29,131 @@ export const FournisseursView: React.FC = () => {
     products,
     reglementsFournisseurs,
     recordSupplierPayment,
+    toBaseAmount,
+    fromBaseAmount,
+    displayCurrency,
+    isSaving,
   } = useApp();
 
-  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState<boolean>(false);
-  const [isBonModalOpen, setIsBonModalOpen] = useState<boolean>(false);
+  type PurchaseMethod = Exclude<PaymentMethod, 'CREDIT'>;
+  const purchaseMethods: Array<{ id: PurchaseMethod; label: string }> = [
+    { id: 'ESPECE', label: 'Espèces' },
+    { id: 'MPESA', label: 'M-Pesa' },
+    { id: 'ORANGE_MONEY', label: 'Orange Money' },
+    { id: 'AIRTEL_MONEY', label: 'Airtel Money' },
+    { id: 'AFRIMONEY', label: 'Afrimoney' },
+  ];
+  type DeliveryLine = { produitId: string; quantite: number; prixAchat: number; prixAchatRenseigne: boolean; numeroLot: string; dlc: string };
 
-  // Settlement modal state
+  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+  const [isBonModalOpen, setIsBonModalOpen] = useState(false);
   const [targetSupplierForPayment, setTargetSupplierForPayment] = useState<Fournisseur | null>(null);
-  const [payAmountStr, setPayAmountStr] = useState<string>('');
-  const [payMode, setPayMode] = useState<PaymentMethod>('ESPECE');
-  const [payWithCaisse, setPayWithCaisse] = useState<boolean>(true);
-  const [payNote, setPayNote] = useState<string>('');
+  const [payAmountStr, setPayAmountStr] = useState('');
+  const [payMode, setPayMode] = useState<PurchaseMethod>('ESPECE');
+  const [payWithCaisse, setPayWithCaisse] = useState(true);
+  const [payNote, setPayNote] = useState('');
+  const [payVerified, setPayVerified] = useState(false);
   const [settlementSuccessToast, setSettlementSuccessToast] = useState<string | null>(null);
-
-  // Supplier form
-  const [supNom, setSupNom] = useState<string>('');
-  const [supContact, setSupContact] = useState<string>('');
-  const [supTelephone, setSupTelephone] = useState<string>('+221 33 ');
-  const [supAdresse, setSupAdresse] = useState<string>('');
-
-  // Bon de Réception form
-  const [bonFournisseurId, setBonFournisseurId] = useState<string>(suppliers[0]?.id || '');
-  const [bonNumero, setBonNumero] = useState<string>(`BR-${Date.now().toString().slice(-5)}`);
+  const [supNom, setSupNom] = useState('');
+  const [supContact, setSupContact] = useState('');
+  const [supTelephone, setSupTelephone] = useState('');
+  const [supAdresse, setSupAdresse] = useState('');
+  const [bonFournisseurId, setBonFournisseurId] = useState('');
+  const [bonNumero, setBonNumero] = useState('');
   const [bonStatutPaiement, setBonStatutPaiement] = useState<'PAYE' | 'A_CREDIT'>('PAYE');
+  const [bonModePaiement, setBonModePaiement] = useState<PurchaseMethod>('ESPECE');
+  const [bonPaiementVerified, setBonPaiementVerified] = useState(false);
+  const [bonLines, setBonLines] = useState<DeliveryLine[]>([]);
 
-  // Dynamic lines in delivery receipt
-  const [bonLines, setBonLines] = useState<
-    {
-      produitId: string;
-      quantite: number;
-      prixAchat: number;
-      numeroLot: string;
-      dlc: string;
-    }[]
-  >([
-    {
-      produitId: products[0]?.id || '',
-      quantite: 20,
-      prixAchat: products[0]?.prixAchat || 1000,
-      numeroLot: `LOT-REC-${Date.now().toString().slice(-4)}`,
-      dlc: new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
-    },
-  ]);
+  const totalBon = bonLines.reduce((sum, line) => sum + line.quantite * line.prixAchat, 0);
+  const totalBonComplet = bonLines.length > 0 && bonLines.every(line => line.produitId && line.quantite > 0 && line.prixAchatRenseigne);
 
-  const totalBon = bonLines.reduce((acc, l) => acc + l.quantite * l.prixAchat, 0);
+  const handleOpenBon = () => {
+    setBonFournisseurId(suppliers[0]?.id || '');
+    setBonNumero('');
+    setBonStatutPaiement('PAYE');
+    setBonModePaiement('ESPECE');
+    setBonPaiementVerified(false);
+    setBonLines([]);
+    setIsBonModalOpen(true);
+  };
 
   const handleAddLine = () => {
-    setBonLines(prev => [
-      ...prev,
-      {
-        produitId: products[0]?.id || '',
-        quantite: 10,
-        prixAchat: products[0]?.prixAchat || 1000,
-        numeroLot: `LOT-REC-${Date.now().toString().slice(-4)}`,
-        dlc: new Date(Date.now() + 1000 * 60 * 60 * 24 * 120).toISOString().split('T')[0],
-      },
-    ]);
+    setBonLines(previous => [...previous, { produitId: '', quantite: 0, prixAchat: 0, prixAchatRenseigne: false, numeroLot: '', dlc: '' }]);
   };
 
-  const handleRemoveLine = (idx: number) => {
-    setBonLines(prev => prev.filter((_, i) => i !== idx));
-  };
+  const handleRemoveLine = (index: number) => setBonLines(previous => previous.filter((_, i) => i !== index));
 
-  const handleSaveBon = (e: React.FormEvent) => {
-    e.preventDefault();
-    const sup = suppliers.find(s => s.id === bonFournisseurId);
-    if (!sup || bonLines.length === 0) return;
-
-    addBonReception({
-      numeroBon: bonNumero,
-      fournisseurId: sup.id,
-      nomFournisseur: sup.nom,
+  const handleSaveBon = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const supplier = suppliers.find(item => item.id === bonFournisseurId);
+    if (!supplier || !bonNumero.trim() || bonLines.length === 0) return;
+    if (bonStatutPaiement === 'PAYE' && bonModePaiement !== 'ESPECE' && !bonPaiementVerified) return;
+    const articles = bonLines.map(line => {
+      const product = products.find(item => item.id === line.produitId);
+      if (!product || line.quantite <= 0 || !line.prixAchatRenseigne || !Number.isFinite(line.prixAchat) || line.prixAchat < 0 || !line.numeroLot.trim() || !line.dlc) return null;
+      return { produitId: line.produitId, nomProduit: product.nom, quantite: line.quantite, prixAchat: line.prixAchat, numeroLot: line.numeroLot.trim(), dlc: line.dlc };
+    });
+    if (articles.some(article => article === null)) return;
+    const saved = await addBonReception({
+      numeroBon: bonNumero.trim(),
+      fournisseurId: supplier.id,
+      nomFournisseur: supplier.nom,
       total: totalBon,
       statutPaiement: bonStatutPaiement,
-      articles: bonLines.map(l => {
-        const prod = products.find(p => p.id === l.produitId);
-        return {
-          ...l,
-          nomProduit: prod?.nom || 'Article',
-        };
-      }),
-    });
-
-    setIsBonModalOpen(false);
+      modePaiement: bonStatutPaiement === 'PAYE' ? bonModePaiement : undefined,
+      articles: articles as NonNullable<(typeof articles)[number]>[],
+    }, bonStatutPaiement === 'PAYE' ? bonModePaiement : undefined);
+    if (saved) {
+      setIsBonModalOpen(false);
+      setBonLines([]);
+      setBonNumero('');
+    }
   };
 
-  const handleSaveSupplier = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supNom) return;
-
-    addSupplier({
-      nom: supNom,
-      contact: supContact,
-      telephone: supTelephone,
-      adresse: supAdresse,
+  const handleSaveSupplier = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!supNom.trim()) return;
+    const saved = await addSupplier({
+      nom: supNom.trim(),
+      contact: supContact.trim(),
+      telephone: supTelephone.trim(),
+      adresse: supAdresse.trim(),
     });
-
+    if (!saved) return;
     setIsSupplierModalOpen(false);
     setSupNom('');
     setSupContact('');
+    setSupTelephone('');
+    setSupAdresse('');
   };
 
-  const handleOpenSettlement = (sup: Fournisseur) => {
-    setTargetSupplierForPayment(sup);
-    setPayAmountStr(sup.dette.toString());
+  const handleOpenSettlement = (supplier: Fournisseur) => {
+    setTargetSupplierForPayment(supplier);
+    setPayAmountStr('');
     setPayMode('ESPECE');
     setPayWithCaisse(true);
-    setPayNote(`Règlement facture fournisseur ${sup.nom}`);
+    setPayNote('');
+    setPayVerified(false);
   };
 
-  const handleConfirmSettlement = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmSettlement = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!targetSupplierForPayment) return;
-    const amount = parseFloat(payAmountStr) || 0;
-    if (amount <= 0) return;
-
-    recordSupplierPayment(
+    let amountCdf: number;
+    try { amountCdf = toBaseAmount(Number(payAmountStr) || 0); } catch { return; }
+    if (amountCdf <= 0 || amountCdf > targetSupplierForPayment.dette) return;
+    if (payMode !== 'ESPECE' && !payVerified) return;
+    const saved = await recordSupplierPayment(
       targetSupplierForPayment.id,
-      amount,
+      amountCdf,
       payMode,
       payWithCaisse,
-      payNote
+      payNote.trim(),
     );
-
-    setSettlementSuccessToast(`Règlement de ${formatFCFA(amount)} enregistré pour ${targetSupplierForPayment.nom}`);
-    setTimeout(() => setSettlementSuccessToast(null), 3500);
+    if (!saved) return;
+    setSettlementSuccessToast(`Règlement de ${formatMoney(amountCdf)} enregistré pour ${targetSupplierForPayment.nom}`);
+    window.setTimeout(() => setSettlementSuccessToast(null), 3500);
     setTargetSupplierForPayment(null);
   };
 
@@ -199,7 +199,7 @@ export const FournisseursView: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setIsBonModalOpen(true)}
+            onClick={handleOpenBon}
             className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-orange-500/20 transition-all"
           >
             <PackageCheck className="w-4 h-4" />
@@ -249,7 +249,7 @@ export const FournisseursView: React.FC = () => {
                       s.dette > 0 ? 'text-amber-400' : 'text-emerald-400'
                     }`}
                   >
-                    {formatFCFA(s.dette)}
+                    {formatMoney(s.dette)}
                   </span>
                 </div>
                 {s.dette > 0 ? (
@@ -318,7 +318,7 @@ export const FournisseursView: React.FC = () => {
                       {bon.articles.map(a => `${a.nomProduit} (x${a.quantite})`).join(', ')}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono font-bold text-white">
-                      {formatFCFA(bon.total)}
+                      {formatMoney(bon.total)}
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       <span
@@ -374,7 +374,7 @@ export const FournisseursView: React.FC = () => {
                       {reg.nomFournisseur}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
-                      {formatFCFA(reg.montant)}
+                      {formatMoney(reg.montant)}
                     </td>
                     <td className="py-2.5 px-3 text-center">
                       <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
@@ -425,10 +425,12 @@ export const FournisseursView: React.FC = () => {
                 <div className="space-y-1">
                   <label className="text-slate-300 font-semibold block">Fournisseur *</label>
                   <select
+                    required
                     value={bonFournisseurId}
                     onChange={e => setBonFournisseurId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white"
                   >
+                    <option value="" disabled>Sélectionner</option>
                     {suppliers.map(s => (
                       <option key={s.id} value={s.id}>
                         {s.nom}
@@ -452,7 +454,7 @@ export const FournisseursView: React.FC = () => {
                   <label className="text-slate-300 font-semibold block">Règlement Fournisseur</label>
                   <select
                     value={bonStatutPaiement}
-                    onChange={e => setBonStatutPaiement(e.target.value as 'PAYE' | 'A_CREDIT')}
+                    onChange={e => { setBonStatutPaiement(e.target.value as 'PAYE' | 'A_CREDIT'); setBonPaiementVerified(false); }}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-bold"
                   >
                     <option value="PAYE">Payé comptant</option>
@@ -460,6 +462,20 @@ export const FournisseursView: React.FC = () => {
                   </select>
                 </div>
               </div>
+
+              {bonStatutPaiement === 'PAYE' && <label className="block space-y-1">
+                <span className="text-slate-300 font-semibold">Mode de paiement de la facture</span>
+                <select value={bonModePaiement} onChange={event => { setBonModePaiement(event.target.value as PurchaseMethod); setBonPaiementVerified(false); }} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white">
+                  {purchaseMethods.map(method => <option key={method.id} value={method.id}>{method.label}</option>)}
+                </select>
+              </label>}
+
+              {bonStatutPaiement === 'PAYE' && bonModePaiement !== 'ESPECE' && (
+                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-800/60 bg-amber-950/25 p-3 text-xs leading-5 text-amber-100">
+                  <input type="checkbox" checked={bonPaiementVerified} onChange={event => setBonPaiementVerified(event.target.checked)} className="mt-0.5 accent-orange-500" />
+                  <span>J’ai vérifié l’envoi effectif du paiement au fournisseur dans l’application du prestataire.</span>
+                </label>
+              )}
 
               {/* Delivery lines */}
               <div className="space-y-2 pt-2">
@@ -478,29 +494,23 @@ export const FournisseursView: React.FC = () => {
                 {bonLines.map((line, idx) => (
                   <div
                     key={idx}
-                    className="p-3 bg-slate-950 rounded-xl border border-slate-800 grid grid-cols-1 sm:grid-cols-5 gap-2 items-center"
+                    className="p-3 bg-slate-950 rounded-xl border border-slate-800 grid grid-cols-1 sm:grid-cols-6 gap-2 items-center"
                   >
                     <div className="sm:col-span-2">
                       <label className="text-[10px] text-slate-400 block mb-0.5">Produit</label>
                       <select
+                        required
                         value={line.produitId}
                         onChange={e => {
                           const pId = e.target.value;
-                          const selectedP = products.find(p => p.id === pId);
-                          const newLines = [...bonLines];
-                          newLines[idx].produitId = pId;
-                          if (selectedP) {
-                            newLines[idx].prixAchat = selectedP.prixAchat;
-                          }
-                          setBonLines(newLines);
+                          setBonLines(previous => previous.map((item, index) => index === idx
+                            ? { ...item, produitId: pId, prixAchat: 0, prixAchatRenseigne: false }
+                            : item));
                         }}
                         className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-xs truncate"
                       >
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.nom}
-                          </option>
-                        ))}
+                        <option value="" disabled>Sélectionner un produit</option>
+                        {products.map(p => <option key={p.id} value={p.id}>{p.nom}</option>)}
                       </select>
                     </div>
 
@@ -508,12 +518,38 @@ export const FournisseursView: React.FC = () => {
                       <label className="text-[10px] text-slate-400 block mb-0.5">Qté</label>
                       <input
                         type="number"
-                        min="1"
-                        value={line.quantite}
+                        required
+                        min="0.001"
+                        step="0.001"
+                        value={line.quantite || ''}
                         onChange={e => {
-                          const newLines = [...bonLines];
-                          newLines[idx].quantite = parseFloat(e.target.value) || 0;
-                          setBonLines(newLines);
+                          const value = Number(e.target.value) || 0;
+                          setBonLines(previous => previous.map((item, index) => index === idx ? { ...item, quantite: value } : item));
+                        }}
+                        className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">Coût réellement payé ({displayCurrency}) *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        required
+                        value={line.prixAchatRenseigne ? String(fromBaseAmount(line.prixAchat)) : ''}
+                        onChange={e => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            setBonLines(previous => previous.map((item, index) => index === idx ? { ...item, prixAchat: 0, prixAchatRenseigne: false } : item));
+                            return;
+                          }
+                          const entered = Number(raw);
+                          if (!Number.isFinite(entered) || entered < 0) return;
+                          try {
+                            const prixAchat = toBaseAmount(entered);
+                            setBonLines(previous => previous.map((item, index) => index === idx ? { ...item, prixAchat, prixAchatRenseigne: true } : item));
+                          } catch { /* settings error is displayed at the top of the app */ }
                         }}
                         className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white font-mono text-xs"
                       />
@@ -523,12 +559,9 @@ export const FournisseursView: React.FC = () => {
                       <label className="text-[10px] text-slate-400 block mb-0.5">N° Lot</label>
                       <input
                         type="text"
+                        required
                         value={line.numeroLot}
-                        onChange={e => {
-                          const newLines = [...bonLines];
-                          newLines[idx].numeroLot = e.target.value;
-                          setBonLines(newLines);
-                        }}
+                        onChange={e => setBonLines(previous => previous.map((item, index) => index === idx ? { ...item, numeroLot: e.target.value } : item))}
                         className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white font-mono text-xs"
                       />
                     </div>
@@ -538,12 +571,9 @@ export const FournisseursView: React.FC = () => {
                         <label className="text-[10px] text-slate-400 block mb-0.5">DLC</label>
                         <input
                           type="date"
+                          required
                           value={line.dlc}
-                          onChange={e => {
-                            const newLines = [...bonLines];
-                            newLines[idx].dlc = e.target.value;
-                            setBonLines(newLines);
-                          }}
+                          onChange={e => setBonLines(previous => previous.map((item, index) => index === idx ? { ...item, dlc: e.target.value } : item))}
                           className="w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-xs"
                         />
                       </div>
@@ -565,7 +595,7 @@ export const FournisseursView: React.FC = () => {
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
                 <span className="text-slate-400 font-semibold">Valeur totale marchandise :</span>
                 <span className="text-lg font-black text-white font-mono">
-                  {formatFCFA(totalBon)}
+                  {totalBonComplet ? formatMoney(totalBon) : 'À compléter'}
                 </span>
               </div>
 
@@ -579,7 +609,8 @@ export const FournisseursView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-orange-500/20"
+                  disabled={isSaving || (bonStatutPaiement === 'PAYE' && bonModePaiement !== 'ESPECE' && !bonPaiementVerified)}
+                  className="px-5 py-2.5 rounded-xl bg-orange-500 disabled:opacity-50 hover:bg-orange-600 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-orange-500/20"
                 >
                   <Check className="w-4 h-4" />
                   <span>Valider la Réception &amp; Mettre à jour Stocks</span>
@@ -610,7 +641,7 @@ export const FournisseursView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="Ex: Patisen Sénégal"
+                  placeholder="Nom réel du fournisseur"
                   value={supNom}
                   onChange={e => setSupNom(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white"
@@ -621,7 +652,7 @@ export const FournisseursView: React.FC = () => {
                 <label className="text-slate-300 font-semibold block">Contact Commercial</label>
                 <input
                   type="text"
-                  placeholder="Ex: Ibrahima Dieng"
+                  placeholder="Nom du contact commercial"
                   value={supContact}
                   onChange={e => setSupContact(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white"
@@ -633,6 +664,7 @@ export const FournisseursView: React.FC = () => {
                 <input
                   type="text"
                   value={supTelephone}
+                  placeholder="Téléphone du fournisseur"
                   onChange={e => setSupTelephone(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono"
                 />
@@ -642,7 +674,7 @@ export const FournisseursView: React.FC = () => {
                 <label className="text-slate-300 font-semibold block">Adresse / Entrepôt</label>
                 <input
                   type="text"
-                  placeholder="Ex: Zone Industrielle Dakar"
+                  placeholder="Adresse réelle du fournisseur"
                   value={supAdresse}
                   onChange={e => setSupAdresse(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white"
@@ -659,7 +691,8 @@ export const FournisseursView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center gap-1.5"
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl bg-purple-600 disabled:opacity-50 hover:bg-purple-500 text-white font-bold flex items-center gap-1.5"
                 >
                   <Check className="w-4 h-4" />
                   <span>Enregistrer</span>
@@ -699,17 +732,18 @@ export const FournisseursView: React.FC = () => {
               <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-800/60 flex items-center justify-between">
                 <span className="text-amber-200 font-medium">Dette actuelle due :</span>
                 <span className="font-mono font-black text-amber-400 text-sm">
-                  {formatFCFA(targetSupplierForPayment.dette)}
+                  {formatMoney(targetSupplierForPayment.dette)}
                 </span>
               </div>
 
               <div className="space-y-1">
-                <label className="text-slate-300 font-semibold block">Montant du Règlement (FCFA) *</label>
+                <label className="text-slate-300 font-semibold block">Montant du règlement ({displayCurrency}) *</label>
                 <input
                   type="number"
                   required
-                  min={100}
-                  max={targetSupplierForPayment.dette}
+                  min={0.01}
+                  max={fromBaseAmount(targetSupplierForPayment.dette)}
+                  step="any"
                   value={payAmountStr}
                   onChange={e => setPayAmountStr(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono font-bold text-base focus:ring-2 focus:ring-orange-500 outline-hidden"
@@ -717,7 +751,7 @@ export const FournisseursView: React.FC = () => {
                 <div className="flex gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => setPayAmountStr(targetSupplierForPayment.dette.toString())}
+                    onClick={() => setPayAmountStr(String(fromBaseAmount(targetSupplierForPayment.dette)))}
                     className="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-750 text-orange-400 font-bold border border-slate-700 cursor-pointer"
                   >
                     Tout solder ({formatCurrencyShort(targetSupplierForPayment.dette)})
@@ -725,7 +759,7 @@ export const FournisseursView: React.FC = () => {
                   {targetSupplierForPayment.dette > 50000 && (
                     <button
                       type="button"
-                      onClick={() => setPayAmountStr((Math.round(targetSupplierForPayment.dette / 2)).toString())}
+                      onClick={() => setPayAmountStr(String(fromBaseAmount(targetSupplierForPayment.dette / 2)))}
                       className="text-[10px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold border border-slate-700 cursor-pointer"
                     >
                       50% ({formatCurrencyShort(Math.round(targetSupplierForPayment.dette / 2))})
@@ -736,23 +770,21 @@ export const FournisseursView: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold block">Mode de Paiement</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['ESPECE', 'WAVE', 'ORANGE_MONEY'] as PaymentMethod[]).map(mode => (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {purchaseMethods.map(method => (
                     <button
-                      key={mode}
+                      key={method.id}
                       type="button"
                       onClick={() => {
-                        setPayMode(mode);
-                        if (mode !== 'ESPECE') setPayWithCaisse(false);
-                        else setPayWithCaisse(true);
+                        setPayMode(method.id);
+                        setPayWithCaisse(method.id === 'ESPECE');
+                        setPayVerified(false);
                       }}
-                      className={`p-2.5 rounded-xl border text-center font-bold text-xs transition-all cursor-pointer ${
-                        payMode === mode
-                          ? 'bg-orange-500/20 border-orange-500 text-orange-300 shadow-xs'
-                          : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'
-                      }`}
+                      className={`p-2.5 rounded-xl border text-center font-bold text-xs transition-all cursor-pointer ${payMode === method.id
+                        ? 'bg-orange-500/20 border-orange-500 text-orange-300 shadow-xs'
+                        : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-white'}`}
                     >
-                      {mode === 'ESPECE' ? 'Espèces' : mode === 'WAVE' ? 'Wave' : 'Orange Money'}
+                      {method.label}
                     </button>
                   ))}
                 </div>
@@ -775,11 +807,18 @@ export const FournisseursView: React.FC = () => {
                 </div>
               )}
 
+              {payMode !== 'ESPECE' && (
+                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-800/60 bg-amber-950/25 p-3 text-xs leading-5 text-amber-100">
+                  <input type="checkbox" checked={payVerified} onChange={event => setPayVerified(event.target.checked)} className="mt-0.5 accent-orange-500" />
+                  <span>J’ai vérifié que le transfert a bien été envoyé au fournisseur dans l’application du prestataire.</span>
+                </label>
+              )}
+
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold block">Motif / Référence Facture (Optionnel)</label>
                 <input
                   type="text"
-                  placeholder="Ex: Facture N°8923 ou chèque remis"
+                  placeholder="Référence ou motif réel du règlement"
                   value={payNote}
                   onChange={e => setPayNote(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white"
@@ -796,7 +835,8 @@ export const FournisseursView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold flex items-center gap-1.5 shadow-md shadow-orange-500/20 cursor-pointer"
+                  disabled={isSaving || (payMode !== 'ESPECE' && !payVerified)}
+                  className="px-5 py-2.5 rounded-xl bg-orange-500 disabled:opacity-50 hover:bg-orange-600 text-white font-bold flex items-center gap-1.5 shadow-md shadow-orange-500/20 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>Confirmer le Règlement</span>

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { formatFCFA, formatDateTime, formatCurrencyShort } from '../../utils/format';
-import { downloadCsvFile } from '../../utils/csvExport';
+import { formatMoney, formatDateTime, formatCurrencyShort } from '../../utils/format';
+import { downloadCsvFile, escapeCsvCell } from '../../utils/csvExport';
 import { posAudio } from '../../utils/audio';
 import {
   ResponsiveContainer,
@@ -16,7 +16,6 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ReferenceLine,
 } from 'recharts';
 import {
   TrendingUp,
@@ -40,6 +39,7 @@ import {
 
 interface DailyFinancialRecord {
   dayLabel: string;
+  dateKey: string;
   dateStr: string;
   caNet: number;
   coutAchat: number; // Cost of Goods Sold (COGS)
@@ -52,153 +52,72 @@ interface DailyFinancialRecord {
   nombreTickets: number;
 }
 
+const localDateKey = (value: string | Date): string => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
 export const FinancialReportView: React.FC = () => {
-  const { sales, products, services, mouvementsCaisse, caisseSession } = useApp();
+  const { sales, products, services, cashMovements, settings } = useApp();
 
   const [period, setPeriod] = useState<'7J' | '14J' | '30J'>('7J');
-  const [activeChartTab, setActiveChartTab] = useState<'PROFIT_FLOW' | 'MARGIN_RATE' | 'CATEGORY_MARGIN'>(
-    'PROFIT_FLOW'
-  );
+  const [activeChartTab, setActiveChartTab] = useState<'PROFIT_FLOW' | 'MARGIN_RATE' | 'CATEGORY_MARGIN'>('PROFIT_FLOW');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Helper to get product cost price
-  const getProductCostPrice = (produitId: string): number => {
-    const p = products.find(prod => prod.id === produitId);
-    return p ? p.prixAchat : 0;
-  };
-
-  // Calculate today's real financials
-  const todayIso = new Date().toISOString().split('T')[0];
-  const todaySales = sales.filter(s => s.createdAt.startsWith(todayIso));
-  const todayServices = services.filter(s => s.date.startsWith(todayIso));
-  const todayMouvements = mouvementsCaisse.filter(m => m.date.startsWith(todayIso));
-
-  const caNetJour = todaySales.reduce((acc, s) => acc + s.totalNet, 0);
-
-  // Calculate real COGS (Coût d'Achat des Marchandises Vendues)
-  let coutAchatJour = 0;
-  todaySales.forEach(sale => {
-    sale.lignes.forEach(line => {
-      const unitCost = getProductCostPrice(line.produitId);
-      coutAchatJour += unitCost * line.quantite;
-    });
-  });
-
-  // If cost was 0 (e.g. for mock lines without product reference), derive from estimated margin
-  if (coutAchatJour === 0 && caNetJour > 0) {
-    const totalEstMargin = todaySales.reduce((acc, s) => acc + s.margeEstimee, 0);
-    coutAchatJour = Math.max(0, caNetJour - totalEstMargin);
-  }
-
-  const margeBruteJour = Math.max(0, caNetJour - coutAchatJour);
-  const commissionsServicesJour = todayServices.reduce((acc, s) => acc + s.commission, 0);
-  const depensesMagasinJour = todayMouvements
-    .filter(m => m.type === 'SORTIE')
-    .reduce((acc, m) => acc + m.montant, 0);
-
-  // Master Equation: Bénéfice Net Réel = Marge Brute + Commissions Services - Dépenses Magasin
+  const todayIso = localDateKey(new Date());
+  const todaySales = sales.filter(sale => localDateKey(sale.createdAt) === todayIso);
+  const todayServices = services.filter(service => localDateKey(service.date) === todayIso);
+  const todayMouvements = cashMovements.filter(movement => localDateKey(movement.date) === todayIso);
+  const caNetJour = todaySales.reduce((sum, sale) => sum + sale.totalNet, 0);
+  const coutAchatJour = todaySales.reduce((sum, sale) => sum + sale.lignes.reduce((lineSum, line) => lineSum + (line.coutTotal ?? line.coutUnitaire * line.quantite), 0), 0);
+  const margeBruteJour = caNetJour - coutAchatJour;
+  const commissionsServicesJour = todayServices.reduce((sum, service) => sum + service.commission, 0);
+  const depensesMagasinJour = todayMouvements.filter(movement => movement.type === 'SORTIE' && movement.impactBenefice !== false).reduce((sum, movement) => sum + movement.montant, 0);
   const beneficeNetJour = margeBruteJour + commissionsServicesJour - depensesMagasinJour;
   const tauxMargeBruteJour = caNetJour > 0 ? (margeBruteJour / caNetJour) * 100 : 0;
-  const tauxBeneficeNetJour =
-    caNetJour > 0 ? (beneficeNetJour / (caNetJour + commissionsServicesJour)) * 100 : 0;
+  const tauxBeneficeNetJour = caNetJour + commissionsServicesJour > 0 ? (beneficeNetJour / (caNetJour + commissionsServicesJour)) * 100 : 0;
 
-  // Generate historical timeline data for 7, 14, or 30 days
+  // Fill the selected calendar range with recorded totals; empty days remain zero rather than estimated.
   const financialTimeline: DailyFinancialRecord[] = useMemo(() => {
     const count = period === '7J' ? 7 : period === '14J' ? 14 : 30;
     const records: DailyFinancialRecord[] = [];
-
-    // Pre-computed baseline trends reflecting realistic retail performance
-    const historicalPatterns = [
-      { ca: 145000, marginRate: 0.26, comms: 3200, expenses: 8500, tickets: 19 },
-      { ca: 198000, marginRate: 0.27, comms: 4500, expenses: 12000, tickets: 26 },
-      { ca: 162000, marginRate: 0.25, comms: 3800, expenses: 5000, tickets: 22 },
-      { ca: 215000, marginRate: 0.28, comms: 5600, expenses: 15000, tickets: 31 },
-      { ca: 184000, marginRate: 0.26, comms: 4100, expenses: 7500, tickets: 25 },
-      { ca: 230000, marginRate: 0.29, comms: 6200, expenses: 14000, tickets: 34 },
-      { ca: 175000, marginRate: 0.25, comms: 3900, expenses: 6000, tickets: 23 },
-      { ca: 205000, marginRate: 0.27, comms: 4800, expenses: 9000, tickets: 28 },
-      { ca: 190000, marginRate: 0.26, comms: 4200, expenses: 8000, tickets: 27 },
-      { ca: 240000, marginRate: 0.28, comms: 6500, expenses: 16000, tickets: 36 },
-      { ca: 168000, marginRate: 0.25, comms: 3500, expenses: 6500, tickets: 21 },
-      { ca: 222000, marginRate: 0.28, comms: 5200, expenses: 11000, tickets: 32 },
-      { ca: 195000, marginRate: 0.27, comms: 4600, expenses: 9500, tickets: 29 },
-    ];
-
-    for (let i = count - 1; i >= 1; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dayLabel =
-        i === 1
-          ? 'Hier'
-          : d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' });
-      const dateStr = d.toLocaleDateString('fr-FR', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      });
-
-      const pattern = historicalPatterns[(count - i) % historicalPatterns.length];
-      const ca = pattern.ca;
-      const cout = Math.round(ca * (1 - pattern.marginRate));
-      const grossMargin = ca - cout;
-      const comms = pattern.comms;
-      const exp = pattern.expenses;
-      const netProfit = grossMargin + comms - exp;
-
+    for (let offset = count - 1; offset >= 0; offset--) {
+      const date = new Date();
+      date.setHours(12, 0, 0, 0);
+      date.setDate(date.getDate() - offset);
+      const dateKey = localDateKey(date);
+      const daySales = sales.filter(sale => localDateKey(sale.createdAt) === dateKey);
+      const dayServices = services.filter(service => localDateKey(service.date) === dateKey);
+      const dayMovements = cashMovements.filter(movement => localDateKey(movement.date) === dateKey);
+      const caNet = daySales.reduce((sum, sale) => sum + sale.totalNet, 0);
+      const coutAchat = daySales.reduce((sum, sale) => sum + sale.lignes.reduce((lineSum, line) => lineSum + (line.coutTotal ?? line.coutUnitaire * line.quantite), 0), 0);
+      const margeBrute = caNet - coutAchat;
+      const commissionsServices = dayServices.reduce((sum, service) => sum + service.commission, 0);
+      const depensesMagasin = dayMovements.filter(movement => movement.type === 'SORTIE' && movement.impactBenefice !== false).reduce((sum, movement) => sum + movement.montant, 0);
+      const beneficeNetReel = margeBrute + commissionsServices - depensesMagasin;
+      const dayLabel = offset === 0 ? "Aujourd'hui" : offset === 1 ? 'Hier' : date.toLocaleDateString('fr-CD', { weekday: 'short' });
       records.push({
         dayLabel,
-        dateStr,
-        caNet: ca,
-        coutAchat: cout,
-        margeBrute: grossMargin,
-        tauxMargeBrute: Number((pattern.marginRate * 100).toFixed(1)),
-        commissionsServices: comms,
-        depensesMagasin: exp,
-        beneficeNetReel: netProfit,
-        tauxBeneficeNet: Number(((netProfit / (ca + comms)) * 100).toFixed(1)),
-        nombreTickets: pattern.tickets,
+        dateKey,
+        dateStr: date.toLocaleDateString('fr-CD', { day: '2-digit', month: 'short', year: 'numeric' }),
+        caNet,
+        coutAchat,
+        margeBrute,
+        tauxMargeBrute: caNet > 0 ? Number(((margeBrute / caNet) * 100).toFixed(1)) : 0,
+        commissionsServices,
+        depensesMagasin,
+        beneficeNetReel,
+        tauxBeneficeNet: caNet + commissionsServices > 0 ? Number(((beneficeNetReel / (caNet + commissionsServices)) * 100).toFixed(1)) : 0,
+        nombreTickets: daySales.length,
       });
     }
-
-    // Today's entry
-    const todayLabel = "Aujourd'hui";
-    const todayDateStr = new Date().toLocaleDateString('fr-FR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-
-    const finalCa = Math.max(caNetJour, 28000);
-    const finalCout = coutAchatJour > 0 ? coutAchatJour : Math.round(finalCa * 0.73);
-    const finalGrossMargin = Math.max(margeBruteJour, finalCa - finalCout);
-    const finalComms = Math.max(commissionsServicesJour, 1500);
-    const finalExp = depensesMagasinJour;
-    const finalNet = finalGrossMargin + finalComms - finalExp;
-
-    records.push({
-      dayLabel: todayLabel,
-      dateStr: todayDateStr,
-      caNet: finalCa,
-      coutAchat: finalCout,
-      margeBrute: finalGrossMargin,
-      tauxMargeBrute: Number(((finalGrossMargin / finalCa) * 100).toFixed(1)),
-      commissionsServices: finalComms,
-      depensesMagasin: finalExp,
-      beneficeNetReel: finalNet,
-      tauxBeneficeNet: Number(((finalNet / (finalCa + finalComms)) * 100).toFixed(1)),
-      nombreTickets: Math.max(todaySales.length, 6),
-    });
-
     return records;
-  }, [
-    period,
-    caNetJour,
-    coutAchatJour,
-    margeBruteJour,
-    commissionsServicesJour,
-    depensesMagasinJour,
-    todaySales.length,
-  ]);
+  }, [period, sales, services, cashMovements]);
+
+  const periodDateKeys = new Set(financialTimeline.map(record => record.dateKey));
+  const periodSales = sales.filter(sale => periodDateKeys.has(localDateKey(sale.createdAt)));
+  const periodServices = services.filter(service => periodDateKeys.has(localDateKey(service.date)));
 
   // Aggregated totals over selected period
   const totalPeriodCA = financialTimeline.reduce((acc, r) => acc + r.caNet, 0);
@@ -215,140 +134,115 @@ export const FinancialReportView: React.FC = () => {
   );
   const averagePeriodMarginRate =
     totalPeriodCA > 0 ? ((totalPeriodMargeBrute / totalPeriodCA) * 100).toFixed(1) : '0';
-  const averagePeriodNetRate =
-    totalPeriodCA > 0
-      ? ((totalPeriodBeneficeNet / (totalPeriodCA + totalPeriodCommissions)) * 100).toFixed(1)
-      : '0';
+  const netRateBase = totalPeriodCA + totalPeriodCommissions;
+  const averagePeriodNetRate = netRateBase > 0
+    ? ((totalPeriodBeneficeNet / netRateBase) * 100).toFixed(1)
+    : '0';
+  const costOfSalesRate = totalPeriodCA > 0 ? (totalPeriodCoutAchat / totalPeriodCA) * 100 : 0;
 
-  // Profit contribution by category
+  // Category margins come from sold line snapshots and recorded service commissions only.
   const categoryProfitData = useMemo(() => {
-    const catMap: Record<string, { ca: number; cout: number; marge: number; count: number }> = {};
-
-    products.forEach(p => {
-      if (!catMap[p.categorie]) {
-        catMap[p.categorie] = { ca: 0, cout: 0, marge: 0, count: 0 };
+    const categoryMap = new Map<string, { ca: number; cout: number; marge: number }>();
+    for (const sale of periodSales) {
+      for (const line of sale.lignes) {
+        const category = products.find(product => product.id === line.produitId)?.categorie || 'Produit archivé';
+        const current = categoryMap.get(category) || { ca: 0, cout: 0, marge: 0 };
+        const lineNet = line.totalLigne - (sale.totalBrut > 0 ? sale.remise * (line.totalLigne / sale.totalBrut) : 0);
+        const lineCost = (line.coutTotal ?? line.coutUnitaire * line.quantite);
+        current.ca += lineNet;
+        current.cout += lineCost;
+        current.marge += lineNet - lineCost;
+        categoryMap.set(category, current);
       }
-      const unitMargin = p.prixVente - p.prixAchat;
-      // Estimate sales weights across inventory
-      catMap[p.categorie].ca += p.prixVente * 5;
-      catMap[p.categorie].cout += p.prixAchat * 5;
-      catMap[p.categorie].marge += unitMargin * 5;
-      catMap[p.categorie].count += 1;
-    });
-
-    // Add Multiservices contribution
-    catMap['Multiservices'] = {
-      ca: totalPeriodCommissions,
-      cout: 0,
-      marge: totalPeriodCommissions,
-      count: services.length,
-    };
-
-    return Object.keys(catMap).map(cat => ({
-      category: cat,
-      ca: catMap[cat].ca,
-      marge: catMap[cat].marge,
-      cout: catMap[cat].cout,
-      taux: catMap[cat].ca > 0 ? Math.round((catMap[cat].marge / catMap[cat].ca) * 100) : 0,
+    }
+    const serviceCommission = periodServices.reduce((sum, service) => sum + service.commission, 0);
+    if (serviceCommission !== 0) categoryMap.set('Commissions multiservices', { ca: serviceCommission, cout: 0, marge: serviceCommission });
+    return Array.from(categoryMap.entries()).map(([category, values]) => ({
+      category,
+      ca: values.ca,
+      marge: values.marge,
+      cout: values.cout,
+      taux: values.ca > 0 ? Math.round((values.marge / values.ca) * 100) : 0,
     }));
-  }, [products, services.length, totalPeriodCommissions]);
+  }, [periodSales, periodServices, products]);
 
-  // Top products contributing to profit
+  // Product ranking uses only actual sold quantities in the selected period.
   const topProfitableProducts = useMemo(() => {
-    return products
-      .map(p => {
-        const margeUnitaire = p.prixVente - p.prixAchat;
-        const taux = p.prixVente > 0 ? (margeUnitaire / p.prixVente) * 100 : 0;
-        // Estimate volume from sales history or stock activity
-        const volumeVente = Math.max(3, Math.round(p.stock * 0.4));
-        const totalCa = volumeVente * p.prixVente;
-        const totalCout = volumeVente * p.prixAchat;
-        const totalMarge = volumeVente * margeUnitaire;
-
-        return {
-          id: p.id,
-          nom: p.nom,
-          categorie: p.categorie,
-          unite: p.unite,
-          prixAchat: p.prixAchat,
-          prixVente: p.prixVente,
-          margeUnitaire,
-          volumeVente,
-          totalCa,
-          totalCout,
-          totalMarge,
-          tauxMarge: Number(taux.toFixed(1)),
-        };
-      })
-      .sort((a, b) => b.totalMarge - a.totalMarge)
-      .slice(0, 8);
-  }, [products]);
+    const productMap = new Map<string, { quantity: number; ca: number; cost: number; priceTotal: number; purchaseTotal: number }>();
+    for (const sale of periodSales) {
+      for (const line of sale.lignes) {
+        const current = productMap.get(line.produitId) || { quantity: 0, ca: 0, cost: 0, priceTotal: 0, purchaseTotal: 0 };
+        const lineNet = line.totalLigne - (sale.totalBrut > 0 ? sale.remise * (line.totalLigne / sale.totalBrut) : 0);
+        current.quantity += line.quantite;
+        current.ca += lineNet;
+        current.cost += (line.coutTotal ?? line.coutUnitaire * line.quantite);
+        current.priceTotal += line.prixUnitaire * line.quantite;
+        current.purchaseTotal += (line.coutTotal ?? line.coutUnitaire * line.quantite);
+        productMap.set(line.produitId, current);
+      }
+    }
+    return Array.from(productMap.entries()).map(([id, values]) => {
+      const product = products.find(item => item.id === id);
+      const totalMarge = values.ca - values.cost;
+      return {
+        id,
+        nom: product?.nom || periodSales.flatMap(sale => sale.lignes).find(line => line.produitId === id)?.nomProduit || 'Produit archivé',
+        categorie: product?.categorie || 'Produit archivé',
+        unite: product?.unite || 'PIECE',
+        prixAchat: values.quantity > 0 ? values.purchaseTotal / values.quantity : 0,
+        prixVente: values.quantity > 0 ? values.priceTotal / values.quantity : 0,
+        margeUnitaire: values.quantity > 0 ? totalMarge / values.quantity : 0,
+        volumeVente: values.quantity,
+        totalCa: values.ca,
+        totalCout: values.cost,
+        totalMarge,
+        tauxMarge: values.ca > 0 ? Number(((totalMarge / values.ca) * 100).toFixed(1)) : 0,
+      };
+    }).sort((a, b) => b.totalMarge - a.totalMarge).slice(0, 8);
+  }, [periodSales, products]);
 
   // Export CSV of Financial Report
   const handleExportFinancialCsv = () => {
     const lines: string[] = [];
-    const dateStr = new Date().toISOString().split('T')[0];
+    const dateStr = localDateKey(new Date());
+    const row = (...cells: Array<string | number | undefined | null>) => cells.map(escapeCsvCell).join(';');
 
-    lines.push('F.A.N.A MULTISERVICES - RAPPORT FINANCIER & ANALYSE DU BENEFICE NET');
-    lines.push(`Date d'export;${new Date().toLocaleString('fr-FR')}`);
-    lines.push(`Periode analysee;${period === '7J' ? '7 Derniers Jours' : period === '14J' ? '14 Jours' : '30 Jours'}`);
-    lines.push('Devise;FCFA (Francs CFA)');
+    lines.push(row(settings.organizationName || 'Organisation non renseignée', 'RAPPORT FINANCIER & ANALYSE DU BÉNÉFICE NET'));
+    lines.push(row('Date d’export', new Date().toLocaleString('fr-CD')));
+    lines.push(row('Période analysée', period === '7J' ? '7 derniers jours' : period === '14J' ? '14 jours' : '30 jours'));
+    lines.push(row('Devise des montants comptabilisés', 'CDF'));
     lines.push('');
 
-    // Totals
-    lines.push('=== 1. SYNTHESE DE LA PERIODE ===');
-    lines.push(`Chiffre d'Affaires Net Total (FCFA);${totalPeriodCA}`);
-    lines.push(`Cout d'Achat des Marchandises Vendues (COGS) (FCFA);${totalPeriodCoutAchat}`);
-    lines.push(`Marge Commerciale Brute (FCFA);${totalPeriodMargeBrute}`);
-    lines.push(`Taux de Marge Brute Moyen;${averagePeriodMarginRate}%`);
-    lines.push(`Commissions Multiservices Nettes (FCFA);${totalPeriodCommissions}`);
-    lines.push(`Depenses et Charges d'Exploitation (FCFA);${totalPeriodDepenses}`);
-    lines.push(`BENEFICE NET REEL DEGAGE (FCFA);${totalPeriodBeneficeNet}`);
-    lines.push(`Taux de Rentabilite Nette;${averagePeriodNetRate}%`);
+    lines.push('=== 1. SYNTHÈSE DE LA PÉRIODE ===');
+    lines.push(row('Chiffre d’affaires net total (CDF)', totalPeriodCA));
+    lines.push(row('Coût d’achat des marchandises vendues (CDF)', totalPeriodCoutAchat));
+    lines.push(row('Marge commerciale brute (CDF)', totalPeriodMargeBrute));
+    lines.push(row('Taux de marge brute moyen', `${averagePeriodMarginRate}%`));
+    lines.push(row('Commissions multiservices nettes (CDF)', totalPeriodCommissions));
+    lines.push(row('Dépenses et charges d’exploitation (CDF)', totalPeriodDepenses));
+    lines.push(row('Bénéfice net réel dégagé (CDF)', totalPeriodBeneficeNet));
+    lines.push(row('Taux de rentabilité nette', `${averagePeriodNetRate}%`));
     lines.push('');
 
-    // Daily breakdown
-    lines.push('=== 2. TABLEAU CHRONOLOGIQUE DU BENEFICE NET QUOTIDIEN ===');
-    lines.push(
-      'Jour;Date;CA Net (FCFA);Cout d Achat (FCFA);Marge Brute (FCFA);Taux Marge (%);Commissions (FCFA);Depenses Magasin (FCFA);Benefice Net Reel (FCFA);Taux Net (%)'
-    );
-    financialTimeline.forEach(r => {
-      lines.push(
-        [
-          `"${r.dayLabel}"`,
-          `"${r.dateStr}"`,
-          r.caNet,
-          r.coutAchat,
-          r.margeBrute,
-          `"${r.tauxMargeBrute}%"`,
-          r.commissionsServices,
-          r.depensesMagasin,
-          r.beneficeNetReel,
-          `"${r.tauxBeneficeNet}%"`,
-        ].join(';')
-      );
+    lines.push('=== 2. TABLEAU CHRONOLOGIQUE DU BÉNÉFICE NET QUOTIDIEN ===');
+    lines.push('Jour;Date;CA net (CDF);Coût d’achat (CDF);Marge brute (CDF);Taux marge (%);Commissions (CDF);Dépenses magasin (CDF);Bénéfice net réel (CDF);Taux net (%)');
+    financialTimeline.forEach(record => {
+      lines.push(row(
+        record.dayLabel, record.dateStr, record.caNet, record.coutAchat, record.margeBrute,
+        `${record.tauxMargeBrute}%`, record.commissionsServices, record.depensesMagasin,
+        record.beneficeNetReel, `${record.tauxBeneficeNet}%`,
+      ));
     });
 
     lines.push('');
-    lines.push('=== 3. TOP PRODUITS CONTRIBUTEURS A LA MARGE ===');
-    lines.push(
-      'Produit;Categorie;Prix Achat (FCFA);Prix Vente (FCFA);Marge Unit. (FCFA);Quantite Vendue;CA Total (FCFA);Cout Total (FCFA);Benefice Genere (FCFA);Taux (%)'
-    );
-    topProfitableProducts.forEach(p => {
-      lines.push(
-        [
-          `"${p.nom}"`,
-          `"${p.categorie}"`,
-          p.prixAchat,
-          p.prixVente,
-          p.margeUnitaire,
-          p.volumeVente,
-          p.totalCa,
-          p.totalCout,
-          p.totalMarge,
-          `"${p.tauxMarge}%"`,
-        ].join(';')
-      );
+    lines.push('=== 3. TOP PRODUITS CONTRIBUTEURS À LA MARGE ===');
+    lines.push('Produit;Catégorie;Prix achat (CDF);Prix vente (CDF);Marge unitaire (CDF);Quantité vendue;CA total (CDF);Coût total (CDF);Bénéfice généré (CDF);Taux (%)');
+    topProfitableProducts.forEach(product => {
+      lines.push(row(
+        product.nom, product.categorie, product.prixAchat, product.prixVente,
+        product.margeUnitaire, product.volumeVente, product.totalCa, product.totalCout,
+        product.totalMarge, `${product.tauxMarge}%`,
+      ));
     });
 
     downloadCsvFile(lines.join('\r\n'), `FANA-Rapport-Financier-Benefice-${dateStr}.csv`);
@@ -374,7 +268,7 @@ export const FinancialReportView: React.FC = () => {
                 <span className="w-2 h-2 rounded-full bg-orange-500" />
                 Chiffre d'Affaires :
               </span>
-              <span className="font-mono font-bold">{formatFCFA(dataItem.caNet)}</span>
+              <span className="font-mono font-bold">{formatMoney(dataItem.caNet)}</span>
             </div>
 
             <div className="flex justify-between items-center text-slate-300">
@@ -382,7 +276,7 @@ export const FinancialReportView: React.FC = () => {
                 <span className="w-2 h-2 rounded-full bg-slate-500" />
                 Coût d'Achat (COGS) :
               </span>
-              <span className="font-mono font-bold">{formatFCFA(dataItem.coutAchat)}</span>
+              <span className="font-mono font-bold">{formatMoney(dataItem.coutAchat)}</span>
             </div>
 
             <div className="flex justify-between items-center text-emerald-400 font-semibold border-t border-slate-800 pt-1">
@@ -391,7 +285,7 @@ export const FinancialReportView: React.FC = () => {
                 Bénéfice Net Réel :
               </span>
               <span className="font-mono font-extrabold text-sm">
-                +{formatFCFA(dataItem.beneficeNetReel)}
+                {formatMoney(dataItem.beneficeNetReel)}
               </span>
             </div>
 
@@ -497,11 +391,11 @@ export const FinancialReportView: React.FC = () => {
             </div>
           </div>
           <div>
-            <div className="text-2xl font-black text-white font-mono">{formatFCFA(totalPeriodCA)}</div>
+            <div className="text-2xl font-black text-white font-mono">{formatMoney(totalPeriodCA)}</div>
             <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
               <span>Moyenne :</span>
               <span className="font-bold text-slate-200 font-mono">
-                {formatFCFA(Math.round(totalPeriodCA / financialTimeline.length))} / jour
+                {formatMoney(Math.round(totalPeriodCA / financialTimeline.length))} / jour
               </span>
             </div>
           </div>
@@ -517,12 +411,12 @@ export const FinancialReportView: React.FC = () => {
           </div>
           <div>
             <div className="text-2xl font-black text-slate-300 font-mono">
-              {formatFCFA(totalPeriodCoutAchat)}
+              {formatMoney(totalPeriodCoutAchat)}
             </div>
             <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
               <span>Part du CA :</span>
               <span className="font-bold text-slate-200 font-mono">
-                {totalPeriodCA > 0 ? ((totalPeriodCoutAchat / totalPeriodCA) * 100).toFixed(1) : 0}%
+                {costOfSalesRate.toFixed(1)}%
               </span>
             </div>
           </div>
@@ -538,7 +432,7 @@ export const FinancialReportView: React.FC = () => {
           </div>
           <div>
             <div className="text-2xl font-black text-emerald-400 font-mono">
-              +{formatFCFA(totalPeriodMargeBrute)}
+              {formatMoney(totalPeriodMargeBrute)}
             </div>
             <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
               <span>Taux de marge brute :</span>
@@ -559,7 +453,7 @@ export const FinancialReportView: React.FC = () => {
           </div>
           <div>
             <div className="text-2xl font-black text-white font-mono tracking-tight">
-              +{formatFCFA(totalPeriodBeneficeNet)}
+              {formatMoney(totalPeriodBeneficeNet)}
             </div>
             <div className="flex items-center gap-1 text-[11px] text-emerald-300 mt-1">
               <span>Rentabilité nette globale :</span>
@@ -574,7 +468,7 @@ export const FinancialReportView: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="font-bold text-slate-300">Formule Comptable F.A.N.A :</span>
           <span className="text-slate-400 font-mono">
-            [CA Net ({formatCurrencyShort(totalPeriodCA)})] - [Achats ({formatCurrencyShort(totalPeriodCoutAchat)})] + [Commissions Multiservices (+{formatCurrencyShort(totalPeriodCommissions)})] - [Charges/Sorties (-{formatCurrencyShort(totalPeriodDepenses)})] = <strong className="text-emerald-400 font-extrabold">Bénéfice Net (+{formatCurrencyShort(totalPeriodBeneficeNet)})</strong>
+            [CA Net ({formatCurrencyShort(totalPeriodCA)})] - [Achats ({formatCurrencyShort(totalPeriodCoutAchat)})] + [Commissions Multiservices (+{formatCurrencyShort(totalPeriodCommissions)})] - [Charges/Sorties (-{formatCurrencyShort(totalPeriodDepenses)})] = <strong className="text-emerald-400 font-extrabold">Bénéfice Net ({formatCurrencyShort(totalPeriodBeneficeNet)})</strong>
           </span>
         </div>
         <span className="text-[10px] text-slate-500">Période : {period}</span>
@@ -670,7 +564,7 @@ export const FinancialReportView: React.FC = () => {
                     fontSize={10}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={val => `${Math.round(val / 1000)}k F`}
+                    tickFormatter={val => formatCurrencyShort(val)}
                   />
 
                   <Tooltip content={<FinancialCustomTooltip />} />
@@ -729,20 +623,12 @@ export const FinancialReportView: React.FC = () => {
                     fontSize={10}
                     tickLine={false}
                     axisLine={false}
-                    domain={[10, 40]}
                     tickFormatter={val => `${val}%`}
                   />
 
                   <Tooltip
                     formatter={(value: any) => [`${value}%`, 'Taux de Marge']}
                     contentStyle={{ backgroundColor: '#020617', borderColor: '#334155', borderRadius: '12px' }}
-                  />
-
-                  <ReferenceLine
-                    y={25}
-                    stroke="#F97316"
-                    strokeDasharray="3 3"
-                    label={{ value: 'Objectif 25%', fill: '#F97316', fontSize: 10, position: 'right' }}
                   />
 
                   <Line
@@ -780,10 +666,10 @@ export const FinancialReportView: React.FC = () => {
                     fontSize={10}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={val => `${Math.round(val / 1000)}k F`}
+                    tickFormatter={val => formatCurrencyShort(val)}
                   />
                   <Tooltip
-                    formatter={(val: any) => formatFCFA(val)}
+                    formatter={(val: any) => formatMoney(val)}
                     contentStyle={{ backgroundColor: '#020617', borderColor: '#334155', borderRadius: '12px' }}
                   />
                   <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: 11 }} />
@@ -815,11 +701,11 @@ export const FinancialReportView: React.FC = () => {
                 <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-emerald-500 h-full rounded-full"
-                    style={{ width: `${Math.min(100, parseFloat(averagePeriodMarginRate) * 2.5)}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, parseFloat(averagePeriodMarginRate) * 2.5))}%` }}
                   />
                 </div>
                 <span className="text-[10px] text-slate-500 mt-1 block">
-                  Pour 100 F vendus, <strong>{averagePeriodMarginRate} F</strong> de marge brute sont dégagés.
+                  Taux calculé sur le chiffre d’affaires et le coût des articles réellement vendus.
                 </span>
               </div>
 
@@ -827,17 +713,17 @@ export const FinancialReportView: React.FC = () => {
                 <div className="flex justify-between items-baseline text-xs mb-1">
                   <span className="text-slate-400">Coût d'Achat Marchandises (COGS) :</span>
                   <span className="text-base font-black text-slate-200 font-mono">
-                    {totalPeriodCA > 0 ? ((totalPeriodCoutAchat / totalPeriodCA) * 100).toFixed(1) : 0}%
+                    {costOfSalesRate.toFixed(1)}%
                   </span>
                 </div>
                 <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                   <div
                     className="bg-slate-500 h-full rounded-full"
-                    style={{ width: `${Math.min(100, (totalPeriodCoutAchat / totalPeriodCA) * 100)}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, costOfSalesRate))}%` }}
                   />
                 </div>
                 <span className="text-[10px] text-slate-500 mt-1 block">
-                  Part de votre chiffre d'affaires reversée aux grossistes (SODIDA, Patisen, Kirène...).
+                  Part du chiffre d'affaires correspondant au coût des articles effectivement vendus.
                 </span>
               </div>
 
@@ -856,7 +742,7 @@ export const FinancialReportView: React.FC = () => {
           </div>
 
           <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-xs text-emerald-300">
-            Objectif commercial F.A.N.A : Maintenir la marge brute au-dessus de 25% et les charges sous 6% du CA.
+            Les ratios ci-dessus sont calculés à partir des ventes et opérations enregistrées pendant la période.
           </div>
         </div>
       </div>
@@ -900,22 +786,22 @@ export const FinancialReportView: React.FC = () => {
                     </div>
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono text-slate-300">
-                    {formatFCFA(p.prixAchat)}
+                    {formatMoney(p.prixAchat)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-bold text-orange-400">
-                    {formatFCFA(p.prixVente)}
+                    {formatMoney(p.prixVente)}
                   </td>
                   <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-200">
                     {p.volumeVente} {p.unite === 'KG' ? 'kg' : ''}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-bold text-white">
-                    {formatFCFA(p.totalCa)}
+                    {formatMoney(p.totalCa)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono text-slate-400">
-                    {formatFCFA(p.totalCout)}
+                    {formatMoney(p.totalCout)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-extrabold text-emerald-400">
-                    +{formatFCFA(p.totalMarge)}
+                    {formatMoney(p.totalMarge)}
                   </td>
                   <td className="py-2.5 px-3 text-center font-mono">
                     <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-emerald-950/80 text-emerald-300 border border-emerald-800">
@@ -962,25 +848,25 @@ export const FinancialReportView: React.FC = () => {
                     <span className="text-[10px] text-slate-400 font-mono block">{record.dateStr}</span>
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-bold text-orange-400">
-                    {formatFCFA(record.caNet)}
+                    {formatMoney(record.caNet)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono text-slate-400">
-                    {formatFCFA(record.coutAchat)}
+                    {formatMoney(record.coutAchat)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
-                    +{formatFCFA(record.margeBrute)}
+                    {formatMoney(record.margeBrute)}
                   </td>
                   <td className="py-2.5 px-3 text-center font-mono text-slate-300">
                     {record.tauxMargeBrute}%
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono text-sky-400 font-bold">
-                    +{formatFCFA(record.commissionsServices)}
+                    {formatMoney(record.commissionsServices)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono text-red-400">
-                    {record.depensesMagasin > 0 ? `-${formatFCFA(record.depensesMagasin)}` : '0 F'}
+                    {record.depensesMagasin > 0 ? `-${formatMoney(record.depensesMagasin)}` : formatMoney(0)}
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-black text-sm text-emerald-400">
-                    +{formatFCFA(record.beneficeNetReel)}
+                    {formatMoney(record.beneficeNetReel)}
                   </td>
                   <td className="py-2.5 px-3 text-center font-mono">
                     <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-emerald-950/80 text-emerald-300 border border-emerald-800">

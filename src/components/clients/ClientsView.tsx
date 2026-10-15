@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Client, PaymentMethod } from '../../types';
-import { formatFCFA, formatDateTime, formatCurrencyShort } from '../../utils/format';
+import { formatMoney, formatDateTime, formatCurrencyShort } from '../../utils/format';
 import { 
   Users, 
   UserPlus, 
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 export const ClientsView: React.FC = () => {
-  const { clients, addClient, updateClient, recordClientPayment } = useApp();
+  const { clients, addClient, updateClient, recordClientPayment, toBaseAmount, fromBaseAmount, displayCurrency, isSaving } = useApp();
 
   const [search, setSearch] = useState<string>('');
   const [filterDebtOnly, setFilterDebtOnly] = useState<boolean>(false);
@@ -33,6 +33,7 @@ export const ClientsView: React.FC = () => {
   const [paymentAmountStr, setPaymentAmountStr] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('ESPECE');
   const [paymentNote, setPaymentNote] = useState<string>('');
+  const [paymentVerified, setPaymentVerified] = useState(false);
 
   const [viewHistoryClient, setViewHistoryClient] = useState<Client | null>(null);
 
@@ -52,66 +53,55 @@ export const ClientsView: React.FC = () => {
 
   const handleOpenPayment = (client: Client) => {
     setPaymentClient(client);
-    setPaymentAmountStr(client.credit.toString());
+    setPaymentAmountStr('');
     setPaymentMethod('ESPECE');
-    setPaymentNote(`Règlement partiel/total ardoise`);
+    setPaymentNote('');
+    setPaymentVerified(false);
   };
 
-  const handleConfirmPayment = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmPayment = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!paymentClient) return;
-    const amount = parseFloat(paymentAmountStr) || 0;
-    if (amount <= 0) return;
-
-    recordClientPayment(paymentClient.id, amount, paymentMethod, paymentNote);
-    setPaymentClient(null);
+    let amountCdf: number;
+    try { amountCdf = toBaseAmount(Number(paymentAmountStr) || 0); } catch { return; }
+    if (amountCdf <= 0 || amountCdf > paymentClient.credit) return;
+    if (paymentMethod !== 'ESPECE' && !paymentVerified) return;
+    const saved = await recordClientPayment(paymentClient.id, amountCdf, paymentMethod, paymentNote.trim());
+    if (saved) setPaymentClient(null);
   };
 
-  // Client form submit
   const [formNom, setFormNom] = useState<string>('');
   const [formTelephone, setFormTelephone] = useState<string>('');
   const [formAdresse, setFormAdresse] = useState<string>('');
-  const [formPlafond, setFormPlafond] = useState<number>(30000);
+  const [formPlafond, setFormPlafond] = useState<string>('');
 
   const handleOpenAddClient = () => {
     setClientToEdit(null);
     setFormNom('');
-    setFormTelephone('+221 7');
+    setFormTelephone('');
     setFormAdresse('');
-    setFormPlafond(30000);
+    setFormPlafond('');
     setIsClientModalOpen(true);
   };
 
-  const handleOpenEditClient = (c: Client) => {
-    setClientToEdit(c);
-    setFormNom(c.nom);
-    setFormTelephone(c.telephone);
-    setFormAdresse(c.adresse || '');
-    setFormPlafond(c.plafondCredit);
+  const handleOpenEditClient = (client: Client) => {
+    setClientToEdit(client);
+    setFormNom(client.nom);
+    setFormTelephone(client.telephone);
+    setFormAdresse(client.adresse || '');
+    setFormPlafond(String(fromBaseAmount(client.plafondCredit)));
     setIsClientModalOpen(true);
   };
 
-  const handleSaveClientForm = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formNom || !formTelephone) return;
-
-    if (clientToEdit) {
-      updateClient({
-        ...clientToEdit,
-        nom: formNom,
-        telephone: formTelephone,
-        adresse: formAdresse,
-        plafondCredit: formPlafond,
-      });
-    } else {
-      addClient({
-        nom: formNom,
-        telephone: formTelephone,
-        adresse: formAdresse,
-        plafondCredit: formPlafond,
-      });
-    }
-    setIsClientModalOpen(false);
+  const handleSaveClientForm = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!formNom.trim() || !formTelephone.trim()) return;
+    let plafondCdf: number;
+    try { plafondCdf = toBaseAmount(Number(formPlafond) || 0); } catch { return; }
+    const saved = clientToEdit
+      ? await updateClient({ ...clientToEdit, nom: formNom.trim(), telephone: formTelephone.trim(), adresse: formAdresse.trim(), plafondCredit: plafondCdf })
+      : await addClient({ nom: formNom.trim(), telephone: formTelephone.trim(), adresse: formAdresse.trim(), plafondCredit: plafondCdf });
+    if (saved) setIsClientModalOpen(false);
   };
 
   return (
@@ -134,7 +124,7 @@ export const ClientsView: React.FC = () => {
           <div className="px-3 py-2 bg-slate-850 rounded-xl border border-slate-750 text-right">
             <span className="text-[10px] text-slate-400 uppercase font-semibold block">Total Dettes Clients</span>
             <span className="text-sm font-black text-amber-400 font-mono">
-              {formatFCFA(totalOutstandingCredit)}
+              {formatMoney(totalOutstandingCredit)}
             </span>
           </div>
 
@@ -245,13 +235,13 @@ export const ClientsView: React.FC = () => {
                         client.credit > 0 ? 'text-amber-400' : 'text-emerald-400'
                       }`}
                     >
-                      {formatFCFA(client.credit)}
+                      {formatMoney(client.credit)}
                     </span>
                   </div>
 
                   <div className="flex justify-between text-[11px] text-slate-400">
                     <span>Plafond autorisé :</span>
-                    <span className="font-mono text-slate-200">{formatFCFA(client.plafondCredit)}</span>
+                    <span className="font-mono text-slate-200">{formatMoney(client.plafondCredit)}</span>
                   </div>
 
                   {/* Gauge bar */}
@@ -272,7 +262,7 @@ export const ClientsView: React.FC = () => {
 
                   <div className="flex justify-between text-[10px] text-slate-500">
                     <span>Crédit disponible :</span>
-                    <span className="font-mono text-slate-400">{formatFCFA(soldeRestant)}</span>
+                    <span className="font-mono text-slate-400">{formatMoney(soldeRestant)}</span>
                   </div>
                 </div>
               </div>
@@ -337,26 +327,26 @@ export const ClientsView: React.FC = () => {
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center">
                 <span className="text-slate-400">Dette totale en cours :</span>
                 <span className="text-xl font-black text-amber-400 font-mono">
-                  {formatFCFA(paymentClient.credit)}
+                  {formatMoney(paymentClient.credit)}
                 </span>
               </div>
 
               {/* Amount input */}
               <div className="space-y-1">
                 <div className="flex justify-between items-center">
-                  <label className="text-slate-300 font-semibold">Montant Réglé (FCFA) *</label>
+                  <label className="text-slate-300 font-semibold">Montant réglé ({displayCurrency}) *</label>
                   <button
                     type="button"
-                    onClick={() => setPaymentAmountStr(paymentClient.credit.toString())}
+                    onClick={() => setPaymentAmountStr(String(fromBaseAmount(paymentClient.credit)))}
                     className="text-orange-400 hover:underline font-bold text-[11px]"
                   >
-                    Tout solder ({paymentClient.credit} F)
+                    Tout solder ({formatCurrencyShort(paymentClient.credit)})
                   </button>
                 </div>
                 <input
                   type="number"
-                  min="100"
-                  max={paymentClient.credit}
+                  min="0.01"
+                  max={fromBaseAmount(paymentClient.credit)}
                   required
                   value={paymentAmountStr}
                   onChange={e => setPaymentAmountStr(e.target.value)}
@@ -367,42 +357,34 @@ export const ClientsView: React.FC = () => {
               {/* Mode de règlement */}
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold block">Mode de paiement reçu</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('ESPECE')}
-                    className={`py-2 rounded-lg font-bold border ${
-                      paymentMethod === 'ESPECE'
-                        ? 'bg-emerald-600 text-white border-emerald-500'
-                        : 'bg-slate-800 text-slate-300 border-slate-700'
-                    }`}
-                  >
-                    Espèces
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('WAVE')}
-                    className={`py-2 rounded-lg font-bold border ${
-                      paymentMethod === 'WAVE'
-                        ? 'bg-sky-500 text-white border-sky-400'
-                        : 'bg-slate-800 text-slate-300 border-slate-700'
-                    }`}
-                  >
-                    Wave
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('ORANGE_MONEY')}
-                    className={`py-2 rounded-lg font-bold border ${
-                      paymentMethod === 'ORANGE_MONEY'
-                        ? 'bg-orange-600 text-white border-orange-500'
-                        : 'bg-slate-800 text-slate-300 border-slate-700'
-                    }`}
-                  >
-                    Orange Money
-                  </button>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {([
+                    ['ESPECE', 'Espèces'],
+                    ['MPESA', 'M-Pesa'],
+                    ['ORANGE_MONEY', 'Orange Money'],
+                    ['AIRTEL_MONEY', 'Airtel Money'],
+                    ['AFRIMONEY', 'Afrimoney'],
+                  ] as const).map(([method, label]) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => { setPaymentMethod(method); setPaymentVerified(false); }}
+                      className={`py-2 rounded-lg font-bold border ${paymentMethod === method
+                        ? 'bg-orange-500 text-white border-orange-400'
+                        : 'bg-slate-800 text-slate-300 border-slate-700'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
+
+              {paymentMethod !== 'ESPECE' && (
+                <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-800/60 bg-amber-950/25 p-3 text-xs leading-5 text-amber-100">
+                  <input type="checkbox" checked={paymentVerified} onChange={event => setPaymentVerified(event.target.checked)} className="mt-0.5 accent-orange-500" />
+                  <span>J’ai vérifié la réception de ce règlement sur le compte de l’opérateur.</span>
+                </label>
+              )}
 
               {/* Note */}
               <div className="space-y-1">
@@ -425,7 +407,8 @@ export const ClientsView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-600/20"
+                  disabled={isSaving || (paymentMethod !== 'ESPECE' && !paymentVerified)}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Check className="w-4 h-4" />
                   <span>Valider l'Encaissement</span>
@@ -458,7 +441,7 @@ export const ClientsView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="Ex: Mamadou Sow (Cité Fadia)"
+                  placeholder="Nom complet du client"
                   value={formNom}
                   onChange={e => setFormNom(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-hidden focus:border-orange-500"
@@ -470,7 +453,7 @@ export const ClientsView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="+221 77 000 00 00"
+                  placeholder="Téléphone du client"
                   value={formTelephone}
                   onChange={e => setFormTelephone(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono focus:outline-hidden focus:border-orange-500"
@@ -490,15 +473,15 @@ export const ClientsView: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold block">
-                  Plafond de Crédit Autorisé (FCFA) *
+                  Plafond de crédit autorisé ({displayCurrency}) *
                 </label>
                 <input
                   type="number"
-                  min="5000"
-                  step="5000"
+                  min="0"
+                  step="any"
                   required
                   value={formPlafond}
-                  onChange={e => setFormPlafond(parseFloat(e.target.value) || 0)}
+                  onChange={e => setFormPlafond(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono font-bold focus:outline-hidden focus:border-orange-500"
                 />
               </div>
@@ -552,7 +535,7 @@ export const ClientsView: React.FC = () => {
                     className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between"
                   >
                     <div>
-                      <div className="font-bold text-white">{formatFCFA(pay.montant)}</div>
+                      <div className="font-bold text-white">{formatMoney(pay.montant)}</div>
                       <div className="text-[11px] text-slate-400 mt-0.5">{pay.note}</div>
                       <div className="text-[10px] text-slate-500 mt-1">{formatDateTime(pay.date)}</div>
                     </div>

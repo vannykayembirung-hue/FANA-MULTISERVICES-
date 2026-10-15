@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { formatFCFA, formatCurrencyShort, getDlcStatus } from '../../utils/format';
+import { formatMoney, formatCurrencyShort, getDlcStatus } from '../../utils/format';
 import { LiveAlertBanner } from './LiveAlertBanner';
 import { SalesLineChart, DaySalesData } from './SalesLineChart';
-import { exportFullAccountingCsv, exportSalesTrendsCsv, downloadCsvFile } from '../../utils/csvExport';
+import { exportFullAccountingCsv, exportSalesTrendsCsv, downloadCsvFile, escapeCsvCell } from '../../utils/csvExport';
 import { posAudio } from '../../utils/audio';
-import { Produit } from '../../types';
+import { PaymentMethod, Produit } from '../../types';
 import { 
   TrendingUp, 
   DollarSign, 
@@ -27,6 +27,24 @@ import {
   Check
 } from 'lucide-react';
 
+const localDateKey = (value: string | Date): string => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const DASHBOARD_PAYMENT_METHODS: Array<{ id: PaymentMethod; label: string; color: string }> = [
+  { id: 'ESPECE', label: 'Espèces', color: 'bg-emerald-500' },
+  { id: 'MPESA', label: 'M-Pesa', color: 'bg-red-500' },
+  { id: 'ORANGE_MONEY', label: 'Orange Money', color: 'bg-orange-500' },
+  { id: 'AIRTEL_MONEY', label: 'Airtel Money', color: 'bg-rose-500' },
+  { id: 'AFRIMONEY', label: 'Afrimoney', color: 'bg-violet-500' },
+  { id: 'CREDIT', label: 'Crédit client', color: 'bg-amber-500' },
+];
+
 export const DashboardView: React.FC<{
   onNavigateToProducts?: () => void;
   onNavigateToServices?: () => void;
@@ -40,14 +58,15 @@ export const DashboardView: React.FC<{
   onNavigateToSuppliers,
   onNavigateToFinance,
 }) => {
-  const { sales, products, services, clients, addToCart } = useApp();
+  const { sales, products, services, clients, addToCart, settings, currentRole } = useApp();
+  const roleLabel = currentRole === 'ADMIN' ? 'Administrateur' : currentRole === 'GERANT' ? 'Gérant' : 'Caissier';
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
   const [caPeriod, setCaPeriod] = useState<'JOUR' | 'SEMAINE' | 'MOIS'>('JOUR');
 
   // Calculate today's metrics
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todaySales = sales.filter(s => s.createdAt.startsWith(todayStr));
+  const todayStr = localDateKey(new Date());
+  const todaySales = sales.filter(s => localDateKey(s.createdAt) === todayStr);
 
   const caJour = todaySales.reduce((acc, s) => acc + s.totalNet, 0);
   const margeJour = todaySales.reduce((acc, s) => acc + s.margeEstimee, 0);
@@ -86,59 +105,39 @@ export const DashboardView: React.FC<{
   const lowStockProducts = products.filter(p => p.stock <= p.stockAlerte);
 
   // Multiservices total commissions today
-  const todayServices = services.filter(srv => srv.date.startsWith(todayStr));
+  const todayServices = services.filter(srv => localDateKey(srv.date) === todayStr);
   const totalCommissionsToday = todayServices.reduce((acc, s) => acc + s.commission, 0);
 
   // Total Client Debts (Ardoises en cours)
   const totalCreditsClients = clients.reduce((acc, c) => acc + c.credit, 0);
 
-  // Generate 7-day historical trend data including today's actual sales
+  // Seven-day chart: each point comes only from sales actually stored in Neon.
   const chartData: DaySalesData[] = React.useMemo(() => {
     const results: DaySalesData[] = [];
-    const baseHistorical = [
-      { dayOffset: -6, dayLabel: 'J-6', ca: 145000, marge: 38000, count: 19 },
-      { dayOffset: -5, dayLabel: 'J-5', ca: 198000, marge: 52000, count: 26 },
-      { dayOffset: -4, dayLabel: 'J-4', ca: 162000, marge: 41000, count: 22 },
-      { dayOffset: -3, dayLabel: 'J-3', ca: 215000, marge: 59000, count: 31 },
-      { dayOffset: -2, dayLabel: 'J-2', ca: 184000, marge: 48000, count: 25 },
-      { dayOffset: -1, dayLabel: 'Hier', ca: 230000, marge: 64000, count: 34 },
-    ];
-
-    baseHistorical.forEach(item => {
-      const d = new Date();
-      d.setDate(d.getDate() + item.dayOffset);
-      const dateLabel = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+    for (let offset = 6; offset >= 0; offset--) {
+      const date = new Date();
+      date.setDate(date.getDate() - offset);
+      const key = localDateKey(date);
+      const daySales = sales.filter(sale => localDateKey(sale.createdAt) === key);
+      const dateLabel = date.toLocaleDateString('fr-CD', { weekday: 'short', day: 'numeric', month: 'short' });
+      const dayLabel = offset === 0 ? "Aujourd'hui" : offset === 1 ? 'Hier' : date.toLocaleDateString('fr-CD', { weekday: 'short' });
       results.push({
-        day: item.dayLabel,
+        day: dayLabel,
         dateLabel,
-        ca: item.ca,
-        marge: item.marge,
-        nombreVentes: item.count,
+        ca: daySales.reduce((sum, sale) => sum + sale.totalNet, 0),
+        marge: daySales.reduce((sum, sale) => sum + sale.margeEstimee, 0),
+        nombreVentes: daySales.length,
       });
-    });
-
-    // Today's real live data
-    const todayDate = new Date();
-    results.push({
-      day: "Aujourd'hui",
-      dateLabel: todayDate.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }),
-      ca: Math.max(caJour, 28000),
-      marge: Math.max(margeJour, 7500),
-      nombreVentes: Math.max(todaySales.length, 6),
-    });
-
+    }
     return results;
-  }, [caJour, margeJour, todaySales.length]);
+  }, [sales]);
 
-  // Aggregate Turnovers: Semaine and Mois
-  const caSemaine = React.useMemo(() => {
-    return chartData.reduce((acc, d) => acc + d.ca, 0);
-  }, [chartData]);
-
-  const caMois = React.useMemo(() => {
-    // Current month projection based on weekly performance + previous recorded periods
-    return Math.round(caSemaine * 4.3 + 120000);
-  }, [caSemaine]);
+  const caSemaine = React.useMemo(() => chartData.reduce((sum, day) => sum + day.ca, 0), [chartData]);
+  const margeSemaine = React.useMemo(() => chartData.reduce((sum, day) => sum + day.marge, 0), [chartData]);
+  const monthPrefix = todayStr.slice(0, 7);
+  const salesThisMonth = React.useMemo(() => sales.filter(sale => localDateKey(sale.createdAt).startsWith(monthPrefix)), [monthPrefix, sales]);
+  const caMois = React.useMemo(() => salesThisMonth.reduce((sum, sale) => sum + sale.totalNet, 0), [salesThisMonth]);
+  const margeMois = React.useMemo(() => salesThisMonth.reduce((sum, sale) => sum + sale.margeEstimee, 0), [salesThisMonth]);
 
   // Dynamic Top 10 Products based on sales lines
   interface TopProductItem {
@@ -184,70 +183,20 @@ export const DashboardView: React.FC<{
       }
     });
 
-    // If initial demo sales have fewer than 10 unique products, supplement with catalog leaders
-    if (list.length < 10) {
-      const existingIds = new Set(list.map(i => i.id));
-      const baselineSales = [38, 31, 26, 22, 19, 17, 15, 12, 10, 8];
-      products.forEach((p, idx) => {
-        if (!existingIds.has(p.id) && list.length < 10) {
-          const qty = baselineSales[list.length % baselineSales.length];
-          list.push({
-            id: p.id,
-            nom: p.nom,
-            categorie: p.categorie,
-            rayon: p.rayon,
-            prixVente: p.prixVente,
-            unite: p.unite,
-            quantiteVendue: qty,
-            chiffreAffaires: qty * p.prixVente,
-            stockActuel: p.stock,
-          });
-        }
-      });
-    }
-
     list.sort((a, b) => b.quantiteVendue - a.quantiteVendue);
     return list.slice(0, 10);
   }, [sales, products]);
 
-  // Dynamic Payment Method Distribution
+  // Today's payment mix only. With no recorded sale, every method is exactly 0%.
   const paymentDistribution = React.useMemo(() => {
-    const targetSales = todaySales.length > 0 ? todaySales : sales;
-    const total = targetSales.reduce((acc, s) => acc + s.totalNet, 0);
-
-    const especes = targetSales.filter(s => s.paiement === 'ESPECE').reduce((acc, s) => acc + s.totalNet, 0);
-    const wave = targetSales.filter(s => s.paiement === 'WAVE').reduce((acc, s) => acc + s.totalNet, 0);
-    const om = targetSales.filter(s => s.paiement === 'ORANGE_MONEY').reduce((acc, s) => acc + s.totalNet, 0);
-    const credit = targetSales.filter(s => s.paiement === 'CREDIT').reduce((acc, s) => acc + s.totalNet, 0);
-
-    if (total === 0) {
-      return {
-        especes: { amount: 0, pct: 65 },
-        wave: { amount: 0, pct: 20 },
-        om: { amount: 0, pct: 10 },
-        credit: { amount: 0, pct: 5 },
-        total: 0,
-        isTodayLive: false,
-      };
-    }
-
-    return {
-      especes: { amount: especes, pct: Math.round((especes / total) * 100) },
-      wave: { amount: wave, pct: Math.round((wave / total) * 100) },
-      om: { amount: om, pct: Math.round((om / total) * 100) },
-      credit: { amount: credit, pct: Math.round((credit / total) * 100) },
-      total,
-      isTodayLive: todaySales.length > 0,
-    };
-  }, [todaySales, sales]);
-
-  const margeSemaine = React.useMemo(() => {
-    return chartData.reduce((acc, d) => acc + d.marge, 0);
-  }, [chartData]);
-
-  const margeMois = React.useMemo(() => {
-    return Math.round(margeSemaine * 4.3 + 30000);
-  }, [margeSemaine]);
+    const methods: PaymentMethod[] = ['ESPECE', 'MPESA', 'ORANGE_MONEY', 'AIRTEL_MONEY', 'AFRIMONEY', 'CREDIT'];
+    const amounts = Object.fromEntries(methods.map(method => [method, todaySales
+      .filter(sale => sale.paiement === method)
+      .reduce((sum, sale) => sum + sale.totalNet, 0)])) as Record<PaymentMethod, number>;
+    const total = Object.values(amounts).reduce((sum, amount) => sum + amount, 0);
+    const percentages = Object.fromEntries(methods.map(method => [method, total > 0 ? Math.round((amounts[method] / total) * 100) : 0])) as Record<PaymentMethod, number>;
+    return { amounts, percentages, total, hasSales: total > 0 };
+  }, [todaySales]);
 
   return (
     <div className="flex-1 p-4 lg:p-6 overflow-y-auto space-y-6 bg-slate-900 text-slate-100">
@@ -257,7 +206,7 @@ export const DashboardView: React.FC<{
           <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
             <span>Tableau de Bord Gérant</span>
             <span className="text-xs px-2 py-0.5 rounded-md bg-orange-500/20 text-orange-400 font-bold border border-orange-500/30">
-              Directeur
+              {roleLabel}
             </span>
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -350,7 +299,7 @@ export const DashboardView: React.FC<{
           </div>
           <div>
             <div className="text-2xl font-black text-white font-mono">
-              {formatFCFA(caPeriod === 'JOUR' ? caJour : caPeriod === 'SEMAINE' ? caSemaine : caMois)}
+              {formatMoney(caPeriod === 'JOUR' ? caJour : caPeriod === 'SEMAINE' ? caSemaine : caMois)}
             </div>
             {/* Direct Tri-Display for Jour, Semaine, Mois */}
             <div className="grid grid-cols-3 gap-1 text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800 text-center font-mono">
@@ -397,7 +346,7 @@ export const DashboardView: React.FC<{
           </div>
           <div>
             <div className="text-2xl font-black text-orange-400 font-mono">
-              {formatFCFA(caPeriod === 'JOUR' ? margeJour : caPeriod === 'SEMAINE' ? margeSemaine : margeMois)}
+              {formatMoney(caPeriod === 'JOUR' ? margeJour : caPeriod === 'SEMAINE' ? margeSemaine : margeMois)}
             </div>
             <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
               <div className="flex items-center gap-1">
@@ -525,10 +474,10 @@ export const DashboardView: React.FC<{
           <div>
             <span className="text-xs text-slate-400 font-medium">Commissions Multiservices (Jour)</span>
             <div className="text-xl font-black text-sky-400 font-mono mt-0.5">
-              {formatFCFA(totalCommissionsToday)}
+              {formatMoney(totalCommissionsToday)}
             </div>
             <span className="text-[11px] text-slate-400">
-              {todayServices.length} opérations Wave / OM / Photocopies
+              {todayServices.length} opérations multiservices enregistrées
             </span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center">
@@ -541,7 +490,7 @@ export const DashboardView: React.FC<{
           <div>
             <span className="text-xs text-slate-400 font-medium">Total Dettes Clients (Ardoises)</span>
             <div className="text-xl font-black text-amber-400 font-mono mt-0.5">
-              {formatFCFA(totalCreditsClients)}
+              {formatMoney(totalCreditsClients)}
             </div>
             <span className="text-[11px] text-slate-400">
               {clients.filter(c => c.credit > 0).length} clients avec solde dû
@@ -576,93 +525,32 @@ export const DashboardView: React.FC<{
           <SalesLineChart data={chartData} caJour={caJour} margeJour={margeJour} />
         </div>
 
-        {/* Payment Methods Distribution */}
+        {/* Today's Payment Methods Distribution: percentages derive exclusively from today's sales */}
         <div className="p-5 bg-slate-850 border border-slate-750 rounded-2xl flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-white text-base">Répartition des Encaissements</h3>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                paymentDistribution.isTodayLive
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                  : 'bg-slate-800 text-slate-400'
-              }`}>
-                {paymentDistribution.isTodayLive ? 'Direct Aujourd’hui' : 'Moyenne Globale'}
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-bold text-white text-base">Répartition des ventes du jour</h3>
+              <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full font-bold ${paymentDistribution.hasSales ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}`}>
+                {paymentDistribution.hasSales ? 'Données du jour' : 'Aucune vente aujourd’hui'}
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">Ventilation réelle par mode de règlement</p>
-
-            <div className="mt-5 space-y-3.5">
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    Espèces ({formatCurrencyShort(paymentDistribution.especes.amount)})
-                  </span>
-                  <span className="font-mono font-bold text-white">{paymentDistribution.especes.pct}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div
-                    className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, Math.max(2, paymentDistribution.especes.pct))}%` }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-                    Wave ({formatCurrencyShort(paymentDistribution.wave.amount)})
-                  </span>
-                  <span className="font-mono font-bold text-white">{paymentDistribution.wave.pct}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div
-                    className="bg-sky-500 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, Math.max(2, paymentDistribution.wave.pct))}%` }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-                    Orange Money ({formatCurrencyShort(paymentDistribution.om.amount)})
-                  </span>
-                  <span className="font-mono font-bold text-white">{paymentDistribution.om.pct}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div
-                    className="bg-orange-500 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, Math.max(2, paymentDistribution.om.pct))}%` }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    Crédit Ardoise ({formatCurrencyShort(paymentDistribution.credit.amount)})
-                  </span>
-                  <span className="font-mono font-bold text-white">{paymentDistribution.credit.pct}%</span>
-                </div>
-                <div className="w-full bg-slate-800 rounded-full h-2">
-                  <div
-                    className="bg-amber-500 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(100, Math.max(2, paymentDistribution.credit.pct))}%` }}
-                  />
-                </div>
-              </div>
+            <p className="text-xs text-slate-400 mt-0.5">Modes de règlement enregistrés aujourd’hui</p>
+            <div className="mt-4 space-y-3">
+              {DASHBOARD_PAYMENT_METHODS.map(method => {
+                const amount = paymentDistribution.amounts[method.id] || 0;
+                const percentage = paymentDistribution.percentages[method.id] || 0;
+                return <div key={method.id}>
+                  <div className="mb-1 flex justify-between gap-2 text-xs">
+                    <span className="flex min-w-0 items-center gap-1.5 font-semibold text-slate-300"><span className={`h-2.5 w-2.5 shrink-0 rounded-full ${method.color}`} />{method.label} ({formatCurrencyShort(amount)})</span>
+                    <span className="font-mono font-bold text-white">{percentage}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800"><div className={`h-2 rounded-full transition-all duration-500 ${method.color}`} style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }} /></div>
+                </div>;
+              })}
             </div>
           </div>
-
           <div className="pt-4 border-t border-slate-750 text-xs text-slate-400 flex items-center justify-between">
-            <span>Total encaissé analysé :</span>
-            <span className="font-mono font-bold text-white">
-              {formatFCFA(paymentDistribution.total)}
-            </span>
+            <span>Total des ventes du jour :</span><span className="font-mono font-bold text-white">{formatMoney(paymentDistribution.total)}</span>
           </div>
         </div>
       </div>
@@ -733,7 +621,7 @@ export const DashboardView: React.FC<{
           </div>
 
           <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-            {top10Products.map((p, idx) => (
+            {top10Products.length === 0 ? <p className="rounded-xl border border-slate-800 bg-slate-900 p-6 text-center text-xs text-slate-400">Aucune vente de produit enregistrée.</p> : top10Products.map((p, idx) => (
               <div
                 key={p.id}
                 onClick={() => onNavigateToPos && onNavigateToPos(products.find(prod => prod.id === p.id))}
@@ -768,7 +656,7 @@ export const DashboardView: React.FC<{
 
                 <div className="text-right">
                   <span className="text-xs font-bold text-orange-400 font-mono">
-                    {formatFCFA(p.chiffreAffaires)}
+                    {formatMoney(p.chiffreAffaires)}
                   </span>
                   <p className="text-[10px] text-slate-400">Stock restant : {p.stockActuel}</p>
                 </div>
@@ -819,6 +707,7 @@ export const DashboardView: React.FC<{
                     services,
                     clients,
                     products,
+                    organizationName: settings.organizationName,
                   });
                   posAudio.playSuccess();
                   setExportToast('Rapport comptable complet téléchargé avec succès !');
@@ -868,10 +757,14 @@ export const DashboardView: React.FC<{
               <div
                 onClick={() => {
                   const nowStr = new Date().toISOString().split('T')[0];
-                  let csv = 'N Ticket;Date;Caissier;Client;Paiement;Sous-Total (FCFA);Remise (FCFA);Net (FCFA);Marge (FCFA)\r\n';
-                  sales.forEach(s => {
-                    csv += `"${s.numeroTicket}";"${s.createdAt}";"${s.nomCaissier}";"${s.nomClient || 'Comptant'}";"${s.paiement}";${s.totalBrut};${s.remise};${s.totalNet};${s.margeEstimee}\r\n`;
-                  });
+                  const csvRows = [
+                    'N° ticket;Date;Caissier;Client;Paiement;Sous-total brut (CDF);Remise (CDF);Net (CDF);Marge estimée (CDF)',
+                    ...sales.map(sale => [
+                      sale.numeroTicket, sale.createdAt, sale.nomCaissier, sale.nomClient || 'Comptant',
+                      sale.paiement, sale.totalBrut, sale.remise, sale.totalNet, sale.margeEstimee,
+                    ].map(escapeCsvCell).join(';')),
+                  ];
+                  const csv = csvRows.join('\r\n');
                   downloadCsvFile(csv, `FANA-Journal-Ventes-${nowStr}.csv`);
                   posAudio.playSuccess();
                   setExportToast('Journal des tickets de caisse exporté en CSV !');
@@ -889,7 +782,7 @@ export const DashboardView: React.FC<{
                   </span>
                 </div>
                 <p className="text-slate-400 text-[11px] leading-relaxed">
-                  Livre de caisse détaillé listant chaque transaction de vente avec nom du client, caissier, et mode de règlement (Espèce, Wave, Orange Money, Crédit).
+                  Journal de chaque vente enregistrée, avec le client, le caissier, le mode de paiement et les montants du grand livre en CDF.
                 </p>
               </div>
 

@@ -11,7 +11,7 @@ import {
   Area,
   AreaChart,
 } from 'recharts';
-import { formatFCFA } from '../../utils/format';
+import { formatMoney, formatCurrencyShort } from '../../utils/format';
 import { exportSalesTrendsCsv } from '../../utils/csvExport';
 import { TrendingUp, Calendar, Layers, DollarSign, Download } from 'lucide-react';
 
@@ -46,7 +46,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
               {entry.name} :
             </span>
             <span className="font-mono font-bold text-white">
-              {formatFCFA(entry.value)}
+              {formatMoney(entry.value)}
             </span>
           </div>
         ))}
@@ -68,12 +68,8 @@ export const SalesLineChart: React.FC<SalesLineChartProps> = ({ data, caJour, ma
   const total7DaysMarge = data.reduce((acc, d) => acc + d.marge, 0);
   const avgDailyCA = Math.round(total7DaysCA / data.length);
 
-  // Y-axis formatter for compact FCFA (e.g. 150k F)
-  const formatYAxis = (value: number) => {
-    if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
-    if (value >= 1000) return `${Math.round(value / 1000)}k F`;
-    return `${value} F`;
-  };
+  // Compact axis values follow the active CDF/USD display setting.
+  const formatYAxis = (value: number) => formatCurrencyShort(value);
 
   return (
     <div className="p-5 bg-slate-850 border border-slate-750 rounded-2xl space-y-4">
@@ -149,19 +145,19 @@ export const SalesLineChart: React.FC<SalesLineChartProps> = ({ data, caJour, ma
         <div>
           <span className="text-slate-400 text-[11px] block">Total 7 Jours (CA) :</span>
           <span className="font-extrabold text-white font-mono text-sm sm:text-base">
-            {formatFCFA(total7DaysCA)}
+            {formatMoney(total7DaysCA)}
           </span>
         </div>
         <div>
           <span className="text-slate-400 text-[11px] block">Moyenne Quotidienne :</span>
           <span className="font-bold text-orange-400 font-mono text-sm sm:text-base">
-            {formatFCFA(avgDailyCA)} / j
+            {formatMoney(avgDailyCA)} / j
           </span>
         </div>
         <div className="col-span-2 sm:col-span-1">
           <span className="text-slate-400 text-[11px] block">Marge Nette 7 Jours :</span>
           <span className="font-bold text-emerald-400 font-mono text-sm sm:text-base">
-            +{formatFCFA(total7DaysMarge)}
+            +{formatMoney(total7DaysMarge)}
           </span>
         </div>
       </div>
