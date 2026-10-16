@@ -1,7 +1,7 @@
-import { ensureSchema } from '../_lib/db';
-import { ApiError, assertSameOrigin, getRequestBody, requireMethod, sendJson, withApiErrors } from '../_lib/http';
-import { createSession, normalizeEmail, verifyPassword } from '../_lib/auth';
-import { clearLoginRateLimit, consumeAuthRateLimit } from '../_lib/rateLimit';
+import { ensureSchema } from '../_lib/db.js';
+import { ApiError, assertSameOrigin, getRequestBody, requireMethod, sendJson, withApiErrors } from '../_lib/http.js';
+import { createSession, normalizeEmail, verifyPassword } from '../_lib/auth.js';
+import { clearLoginRateLimit, consumeAuthRateLimit } from '../_lib/rateLimit.js';
 
 export default withApiErrors(async (req, res) => {
   requireMethod(req, ['POST']);
