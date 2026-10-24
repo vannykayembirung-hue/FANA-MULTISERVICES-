@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CartItem, Client, PaymentMethod } from '../../types';
 import { formatMoney, formatCurrencyShort } from '../../utils/format';
+import { getExpiredStock, getSellableStock } from '../../utils/inventory';
 import { useApp } from '../../context/AppContext';
 import {
   ShoppingBag,
@@ -55,8 +56,23 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
   ticketNumber,
   onManageCashSession,
 }) => {
-  const { toBaseAmount, displayCurrency, caisseSession, isSaving, currentRole, user } = useApp();
-  const canCheckout = caisseSession.statut === 'OUVERTE' && !isSaving;
+  const { toBaseAmount, displayCurrency, caisseSession, isSaving, currentRole, user, products } = useApp();
+  const unavailableCartItem = cart.find(item => {
+    const currentProduct = products.find(product => product.id === item.produit.id);
+    return !currentProduct || item.quantite > getSellableStock(currentProduct) + 0.000001;
+  });
+  const unavailableProduct = unavailableCartItem
+    ? products.find(product => product.id === unavailableCartItem.produit.id) || unavailableCartItem.produit
+    : null;
+  const unavailableStock = unavailableProduct ? getSellableStock(unavailableProduct) : 0;
+  const cartIssueMessage = unavailableCartItem && unavailableProduct
+    ? !products.some(product => product.id === unavailableProduct.id)
+      ? `« ${unavailableProduct.nom} » n’est plus disponible. Retirez-le du panier.`
+      : unavailableStock <= 0 && getExpiredStock(unavailableProduct) > 0
+        ? `« ${unavailableProduct.nom} » est périmé : retirez-le du panier pour encaisser.`
+        : `Stock vendable insuffisant pour « ${unavailableProduct.nom} » (${unavailableStock} disponible(s)).`
+    : null;
+  const canCheckout = caisseSession.statut === 'OUVERTE' && !isSaving && !cartIssueMessage;
   const canManageCurrentSession = currentRole !== 'CAISSIER' || caisseSession.ouvertParId === user.id;
   const [showDiscountInput, setShowDiscountInput] = useState<boolean>(false);
   const [customDiscountValue, setCustomDiscountValue] = useState<string>('');
@@ -344,6 +360,8 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
           </form>
         ) : null}
 
+        {cartIssueMessage && <p role="alert" className="rounded-lg border border-red-900 bg-red-950/40 px-3 py-2 text-[11px] font-semibold text-red-200">{cartIssueMessage}</p>}
+
         {/* Pricing totals */}
         <div className="space-y-1.5 text-xs">
           <div className="flex items-center justify-between text-slate-400">
@@ -399,10 +417,11 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
             type="button"
             disabled={cart.length === 0 || !canCheckout}
             onClick={() => onOpenPaymentModal()}
+            title={cartIssueMessage || (caisseSession.statut !== 'OUVERTE' ? 'Ouvrez la caisse avant de vendre.' : undefined)}
             className="flex-1 py-3.5 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-orange-500/25 transition-all"
           >
-            <span>Encaisser {formatCurrencyShort(cartTotalNet)}</span>
-            <ChevronRight className="w-5 h-5" />
+            <span>{cartIssueMessage ? 'Corrigez le panier' : `Encaisser ${formatCurrencyShort(cartTotalNet)}`}</span>
+            {!cartIssueMessage && <ChevronRight className="w-5 h-5" />}
           </button>
         </div>
       </div>

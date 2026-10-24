@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Produit } from '../../types';
 import { formatCurrencyShort, getDlcStatus } from '../../utils/format';
+import { getExpiredStock, getSellableStock } from '../../utils/inventory';
 import { hardwareScanner, ScannerStatus } from '../../utils/hardwareScanner';
 import { HardwareScannerModal } from './HardwareScannerModal';
 import { 
@@ -27,6 +28,12 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('TOUS');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [scanSuccessMessage, setScanSuccessMessage] = useState<string | null>(null);
+  const [scanMessageIsError, setScanMessageIsError] = useState(false);
+  const showScanMessage = useCallback((message: string, isError = false) => {
+    setScanMessageIsError(isError);
+    setScanSuccessMessage(message);
+    window.setTimeout(() => setScanSuccessMessage(current => current === message ? null : current), 3000);
+  }, []);
   const [isHardwareModalOpen, setIsHardwareModalOpen] = useState<boolean>(false);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus>(hardwareScanner.getStatus());
 
@@ -41,10 +48,11 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       const matched = products.find(p => p.ean === cleanEan);
 
       if (matched) {
-        if (matched.stock <= 0) {
+        if (getSellableStock(matched) <= 0) {
           posAudio.playError();
-          setScanSuccessMessage(`« ${matched.nom} » est en rupture de stock`);
-          setTimeout(() => setScanSuccessMessage(null), 3000);
+          showScanMessage(getExpiredStock(matched) > 0
+            ? `« ${matched.nom} » est périmé : vente impossible.`
+            : `« ${matched.nom} » est en rupture de stock.`, true);
           setSearchQuery('');
           return;
         }
@@ -56,13 +64,11 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         }
         const srcLabel = source === 'SERIAL' ? 'Web Serial' : source === 'HID' ? 'Web HID' : 'Douchette USB';
         setSearchQuery('');
-        setScanSuccessMessage(`Scanné via ${srcLabel} : ${matched.nom}`);
-        setTimeout(() => setScanSuccessMessage(null), 3000);
+        showScanMessage(`Scanné via ${srcLabel} : ${matched.nom}`);
       } else {
         posAudio.playError();
         setSearchQuery('');
-        setScanSuccessMessage(`Code-barre [${cleanEan}] non répertorié`);
-        setTimeout(() => setScanSuccessMessage(null), 3000);
+        showScanMessage(`Code-barre [${cleanEan}] non répertorié.`, true);
       }
     });
 
@@ -70,7 +76,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       unsubStatus();
       unsubBarcode();
     };
-  }, [products, onSelectProduct, onRequestWeigh]);
+  }, [products, onSelectProduct, onRequestWeigh, showScanMessage]);
 
   // Extract unique categories
   const categories = ['TOUS', ...Array.from(new Set(products.map(p => p.categorie)))];
@@ -92,21 +98,28 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
     if (!cleanEan) return;
     const matched = products.find(product => product.ean === cleanEan);
     if (!matched) return;
-    if (matched.stock <= 0) {
+    if (getSellableStock(matched) <= 0) {
       posAudio.playError();
-      setScanSuccessMessage(`« ${matched.nom} » est en rupture de stock`);
-      setTimeout(() => setScanSuccessMessage(null), 2500);
+      showScanMessage(getExpiredStock(matched) > 0
+        ? `« ${matched.nom} » est périmé : vente impossible.`
+        : `« ${matched.nom} » est en rupture de stock.`, true);
       return;
     }
     if (matched.unite === 'KG') onRequestWeigh(matched);
     else onSelectProduct(matched);
     posAudio.playBeep();
-    setScanSuccessMessage(`Code reconnu : ${matched.nom}`);
-    setTimeout(() => setScanSuccessMessage(null), 2500);
+    showScanMessage(`Code reconnu : ${matched.nom}`);
     setSearchQuery('');
   };
 
   const handleProductCardClick = (product: Produit) => {
+    if (getSellableStock(product) <= 0) {
+      posAudio.playError();
+      showScanMessage(getExpiredStock(product) > 0
+        ? `« ${product.nom} » est périmé : vente impossible.`
+        : `« ${product.nom} » est en rupture de stock.`, true);
+      return;
+    }
     if (product.unite === 'KG') {
       onRequestWeigh(product);
     } else {
@@ -149,9 +162,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 
       {/* Notification Toast for Scan */}
       {scanSuccessMessage && (
-        <div className="bg-emerald-950/80 text-emerald-300 px-4 py-1.5 text-xs font-semibold border-b border-emerald-800 flex items-center justify-between animate-in fade-in">
+        <div className={`px-4 py-1.5 text-xs font-semibold border-b flex items-center justify-between animate-in fade-in ${scanMessageIsError ? 'bg-red-950/90 text-red-200 border-red-800' : 'bg-emerald-950/80 text-emerald-300 border-emerald-800'}`} role={scanMessageIsError ? 'alert' : 'status'}>
           <span className="flex items-center gap-2">
-            <Check className="w-3.5 h-3.5 text-emerald-400" />
+            {scanMessageIsError ? <AlertCircle className="w-3.5 h-3.5 text-red-300" /> : <Check className="w-3.5 h-3.5 text-emerald-400" />}
             {scanSuccessMessage}
           </span>
         </div>
@@ -191,27 +204,28 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
             {filteredProducts.map(product => {
-              const isLowStock = product.stock <= product.stockAlerte;
-              const isOutOfStock = product.stock <= 0;
+              const sellableStock = getSellableStock(product);
+              const expiredStock = getExpiredStock(product);
+              const isLowStock = sellableStock <= product.stockAlerte;
+              const isOutOfStock = sellableStock <= 0;
+              const today = new Date().toISOString().slice(0, 10);
+              const eligibleLots = (product.lots || [])
+                .filter(lot => lot.quantite > 0 && (!lot.dlc || lot.dlc >= today))
+                .sort((a, b) => a.dlc.localeCompare(b.dlc));
 
-              // Check if any lot has DLC alert
               let urgentDlcAlert: string | null = null;
-              if (product.lots && product.lots.length > 0) {
-                const earliestLot = [...product.lots].sort(
-                  (a, b) => new Date(a.dlc).getTime() - new Date(b.dlc).getTime()
-                )[0];
-                if (earliestLot) {
-                  const dlc = getDlcStatus(earliestLot.dlc);
-                  if (dlc.status === 'CRITICAL' || dlc.status === 'EXPIRED') {
-                    urgentDlcAlert = dlc.label;
-                  }
-                }
+              if (isOutOfStock && expiredStock > 0) {
+                urgentDlcAlert = 'Périmé — vente bloquée';
+              } else if (eligibleLots[0]?.dlc) {
+                const dlc = getDlcStatus(eligibleLots[0].dlc);
+                if (dlc.status === 'CRITICAL') urgentDlcAlert = dlc.label;
               }
 
               return (
                 <div
                   key={product.id}
-                  onClick={() => !isOutOfStock && handleProductCardClick(product)}
+                  onClick={() => handleProductCardClick(product)}
+                  aria-disabled={isOutOfStock}
                   className={`group relative flex flex-col rounded-xl overflow-hidden border transition-all duration-150 select-none cursor-pointer ${
                     isOutOfStock
                       ? 'bg-slate-900/50 border-slate-800 opacity-60 cursor-not-allowed'
@@ -247,7 +261,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                             : 'bg-slate-900/80 text-emerald-400 border border-slate-700 backdrop-blur-xs'
                         }`}
                       >
-                        {product.stock} {product.unite === 'KG' ? 'kg' : ''}
+                        {sellableStock} {product.unite === 'KG' ? 'kg' : ''}
                       </span>
                     </div>
 
@@ -302,10 +316,11 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             const cleanEan = barcode.trim();
             const matched = products.find(p => p.ean === cleanEan);
             if (matched) {
-              if (matched.stock <= 0) {
+              if (getSellableStock(matched) <= 0) {
                 posAudio.playError();
-                setScanSuccessMessage(`« ${matched.nom} » est en rupture de stock`);
-                setTimeout(() => setScanSuccessMessage(null), 3000);
+                showScanMessage(getExpiredStock(matched) > 0
+                  ? `« ${matched.nom} » est périmé : vente impossible.`
+                  : `« ${matched.nom} » est en rupture de stock.`, true);
                 return;
               }
               if (matched.unite === 'KG') {
@@ -315,11 +330,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
               }
               const srcLabel = source === 'SERIAL' ? 'Web Serial' : source === 'HID' ? 'Web HID' : 'Douchette USB';
               setSearchQuery('');
-              setScanSuccessMessage(`Scanné via ${srcLabel} : ${matched.nom}`);
-              setTimeout(() => setScanSuccessMessage(null), 3000);
+              showScanMessage(`Scanné via ${srcLabel} : ${matched.nom}`);
             } else {
-              setScanSuccessMessage(`Code-barre [${cleanEan}] inconnu`);
-              setTimeout(() => setScanSuccessMessage(null), 3000);
+              showScanMessage(`Code-barre [${cleanEan}] inconnu.`, true);
             }
           }}
           onClose={() => setIsHardwareModalOpen(false)}

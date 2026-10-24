@@ -47,8 +47,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ totalNet, selectedCl
   const cashEnough = cashReceivedCdf + 0.001 >= totalNet;
   const cashPresets = useMemo(() => {
     const exact = fromBaseAmount(totalNet);
-    const rounded = Math.ceil(exact / (displayCurrency === 'USD' ? 5 : 5000)) * (displayCurrency === 'USD' ? 5 : 5000);
-    return Array.from(new Set([exact, rounded, rounded + (displayCurrency === 'USD' ? 5 : 5000)])).filter(value => value > 0);
+    const step = displayCurrency === 'USD' ? 5 : 5000;
+    const rounded = Math.ceil(exact / step) * step;
+    return Array.from(new Set([rounded, rounded + step])).filter(value => value > exact + 0.001);
   }, [displayCurrency, fromBaseAmount, totalNet]);
 
   const submit = async () => {
@@ -83,8 +84,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ totalNet, selectedCl
       <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
         {method === 'ESPECE' && <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <button type="button" onClick={() => setCashReceived(String(fromBaseAmount(totalNet)))} className={`rounded-xl border px-3 py-2.5 text-xs font-bold ${Math.abs(cashReceivedCdf - totalNet) < 0.001 ? 'border-emerald-500 bg-emerald-950/40 text-emerald-200' : 'border-orange-700/70 bg-orange-950/20 text-orange-200 hover:border-orange-500'}`}>Montant exact · {formatCurrencyShort(totalNet)}</button>
             {cashPresets.map((amount, index) => <button key={`${amount}-${index}`} type="button" onClick={() => setCashReceived(String(amount))} className={`rounded-xl border px-3 py-2.5 font-mono text-sm font-bold ${Number(cashReceived) === amount ? 'border-emerald-500 bg-emerald-950/40 text-emerald-200' : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-600'}`}>{formatCurrencyShort(toBaseAmount(amount))}</button>)}
-            <button type="button" onClick={() => setCashReceived(String(fromBaseAmount(totalNet)))} className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-xs font-bold text-orange-300 hover:border-orange-500">Montant exact</button>
           </div>
           <label className="block"><span className="form-label">Montant reçu ({displayCurrency})</span><input autoFocus type="number" min="0" step="any" value={cashReceived} onChange={event => setCashReceived(event.target.value)} className="form-control font-mono text-lg font-bold" /></label>
           <div className={`rounded-xl border p-3 ${changeCdf >= -0.001 ? 'border-emerald-900 bg-emerald-950/30' : 'border-red-900 bg-red-950/30'}`}><div className="text-xs text-slate-400">{changeCdf >= -0.001 ? 'Monnaie à rendre' : 'Montant restant'}</div><div className={`mt-1 font-mono text-xl font-black ${changeCdf >= -0.001 ? 'text-emerald-300' : 'text-red-300'}`}>{formatMoney(Math.abs(changeCdf))}</div></div>
