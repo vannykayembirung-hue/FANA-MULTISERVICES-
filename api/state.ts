@@ -1,7 +1,7 @@
-import { getCurrentUser, requireAuth } from './_lib/auth';
-import { ensureSchema } from './_lib/db';
-import { handleWorkspaceAction, readWorkspaceState } from './_lib/business';
-import { assertSameOrigin, getRequestBody, requireMethod, sendJson, withApiErrors } from './_lib/http';
+import { getCurrentUser, requireAuth } from './_lib/auth.js';
+import { ensureSchema } from './_lib/db.js';
+import { handleWorkspaceAction, readWorkspaceState } from './_lib/business.js';
+import { assertSameOrigin, getRequestBody, requireMethod, sendJson, withApiErrors } from './_lib/http.js';
 
 export default withApiErrors(async (req, res) => {
   await ensureSchema();
