@@ -7,6 +7,7 @@ import {
 import { configureCurrencyDisplay, fromBaseCdf, toBaseCdf } from '../utils/format';
 import { posAudio } from '../utils/audio';
 import { requestJson } from '../utils/request';
+import { getExpiredStock, getSellableStock } from '../utils/inventory';
 
 const EMPTY_SESSION: CaisseSession = {
   id: '', dateOuverture: '', fondOuverture: 0, statut: 'CLOTUREE', ouvertPar: '',
@@ -144,7 +145,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode; user: AppUser }>
         applyState(response.state);
         return response;
       } catch (reason) {
-        setError(reason instanceof Error ? reason.message : 'Enregistrement impossible.');
+        const message = reason instanceof Error ? reason.message : 'Enregistrement impossible.';
+        const normalizedMessage = message.toLowerCase();
+        const refreshSaleState = action === 'finalizeSale' && /session de caisse|stock insuffisant|lots périmés|panier n’existe plus/.test(normalizedMessage);
+        if (refreshSaleState) {
+          try {
+            const latest = await requestJson<{ state: AppData }>('/api/state');
+            applyState(latest.state);
+            setError(normalizedMessage.includes('session de caisse')
+              ? latest.state.caisseSession?.statut === 'OUVERTE'
+                ? 'La caisse a été actualisée, mais la vente n’a pas été enregistrée. Vérifiez la session puis réessayez.'
+                : 'La caisse est fermée. Ouvrez une session avant de valider la vente.'
+              : message);
+          } catch {
+            setError(message);
+          }
+        } else {
+          setError(message);
+        }
         return null;
       } finally {
         setIsSaving(false);
@@ -193,10 +211,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode; user: AppUser }>
   const addToCart = (product: Produit, quantity = 1) => {
     if (!Number.isFinite(quantity) || quantity <= 0) return;
     const currentQuantity = cart.find(item => item.produit.id === product.id)?.quantite || 0;
-    if (currentQuantity + quantity > product.stock + 0.000001) {
-      setError(product.stock <= 0
-        ? `« ${product.nom} » est en rupture de stock.`
-        : `Stock insuffisant pour « ${product.nom} » — ${product.stock} disponible(s).`);
+    const sellableStock = getSellableStock(product);
+    if (currentQuantity + quantity > sellableStock + 0.000001) {
+      const expiredStock = getExpiredStock(product);
+      setError(sellableStock <= 0 && expiredStock > 0
+        ? `« ${product.nom} » est périmé : sa vente est bloquée.`
+        : sellableStock <= 0
+          ? `« ${product.nom} » est en rupture de stock.`
+          : `Stock vendable insuffisant pour « ${product.nom} » — ${sellableStock} disponible(s).`);
       posAudio.playError();
       return;
     }
@@ -211,19 +233,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode; user: AppUser }>
     });
   };
   const updateCartItemQuantity = (productId: string, quantity: number) => {
-    if (quantity <= 0) { setCart(previous => previous.filter(item => item.produit.id !== productId)); return; }
+    if (quantity <= 0) { setError(null); setCart(previous => previous.filter(item => item.produit.id !== productId)); return; }
     const item = cart.find(cartItem => cartItem.produit.id === productId);
     const product = products.find(candidate => candidate.id === productId) || item?.produit;
-    if (!Number.isFinite(quantity) || (product && quantity > product.stock + 0.000001)) {
-      setError(product ? `Stock insuffisant pour « ${product.nom} » — ${product.stock} disponible(s).` : 'Quantité invalide.');
+    const sellableStock = product ? getSellableStock(product) : 0;
+    if (!Number.isFinite(quantity) || (product && quantity > sellableStock + 0.000001)) {
+      const expiredStock = product ? getExpiredStock(product) : 0;
+      setError(product && sellableStock <= 0 && expiredStock > 0
+        ? `« ${product.nom} » est périmé : sa vente est bloquée.`
+        : product
+          ? `Stock vendable insuffisant pour « ${product.nom} » — ${sellableStock} disponible(s).`
+          : 'Quantité invalide.');
       posAudio.playError();
       return;
     }
     setError(null);
     setCart(previous => previous.map(cartItem => cartItem.produit.id === productId ? { ...cartItem, quantite: Number(quantity.toFixed(3)) } : cartItem));
   };
-  const removeFromCart = (productId: string) => setCart(previous => previous.filter(item => item.produit.id !== productId));
-  const clearCart = () => { setCart([]); setCartDiscountState(0); setSelectedClientId(null); };
+  const removeFromCart = (productId: string) => {
+    setError(null);
+    setCart(previous => previous.filter(item => item.produit.id !== productId));
+  };
+  const clearCart = () => { setError(null); setCart([]); setCartDiscountState(0); setSelectedClientId(null); };
   const setCartDiscount = (discountCdf: number) => setCartDiscountState(Math.max(0, Math.min(Number(discountCdf) || 0, cartTotalBrut)));
 
   const parkCurrentCart = async () => {
