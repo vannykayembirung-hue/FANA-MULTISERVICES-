@@ -1,6 +1,6 @@
-import { requireAuth } from './_lib/auth';
-import { ensureSchema } from './_lib/db';
-import { ApiError, requireMethod, withApiErrors } from './_lib/http';
+import { requireAuth } from './_lib/auth.js';
+import { ensureSchema } from './_lib/db.js';
+import { ApiError, requireMethod, withApiErrors } from './_lib/http.js';
 
 export default withApiErrors(async (req, res) => {
   requireMethod(req, ['GET']);

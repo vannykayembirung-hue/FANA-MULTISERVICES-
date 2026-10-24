@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ApiRequest } from './http';
-import { ApiError } from './http';
+import { ApiError } from './http.js';
 
 function requestIp(req: ApiRequest): string {
   const forwarded = req.headers['x-forwarded-for'];

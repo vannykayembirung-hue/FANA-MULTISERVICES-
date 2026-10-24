@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AppUser, BonReception, CaisseSession, Client, Currency, FlotteSolde, Fournisseur, Lot, MouvementCaisse, ParkedCart, PaymentMethod, Produit, ReglementFournisseur, ServiceCatalogItem, ServiceCatalogType, ServiceTransaction, Vente, WorkspaceSettings } from '../../src/types';
-import { ApiError } from './http';
-import { productImageUrl, saveProductImage } from './productImages';
+import { ApiError } from './http.js';
+import { productImageUrl, saveProductImage } from './productImages.js';
 
 const ZERO_FLOAT: FlotteSolde = { mpesa: 0, orangeMoney: 0, airtelMoney: 0, afrimoney: 0 };
 const EMPTY_SESSION: CaisseSession = {

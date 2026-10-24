@@ -1,4 +1,4 @@
-import { ApiError } from './http';
+import { ApiError } from './http.js';
 
 const MAX_IMAGE_BYTES = 600_000;
 const MAX_IMAGE_DATA_URL_LENGTH = 800_000;

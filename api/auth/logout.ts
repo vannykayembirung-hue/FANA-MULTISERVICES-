@@ -1,6 +1,6 @@
-import { clearSessionCookie, destroySession } from '../_lib/auth';
-import { ensureSchema } from '../_lib/db';
-import { assertSameOrigin, requireMethod, sendJson, withApiErrors } from '../_lib/http';
+import { clearSessionCookie, destroySession } from '../_lib/auth.js';
+import { ensureSchema } from '../_lib/db.js';
+import { assertSameOrigin, requireMethod, sendJson, withApiErrors } from '../_lib/http.js';
 
 export default withApiErrors(async (req, res) => {
   requireMethod(req, ['POST']);
