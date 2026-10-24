@@ -1,9 +1,65 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
+const serviceWorkerTemplate = readFileSync(resolve(rootDir, 'pwa/sw.js'), 'utf8');
+
+/** Build an installable shell while deliberately keeping private API data out of Cache Storage. */
+function pwaPlugin(): Plugin {
+  const sourceForVersion = [
+    'public/manifest.webmanifest', 'public/favicon.svg', 'public/apple-touch-icon.png',
+    'public/icons/icon-192.png', 'public/icons/icon-512.png', 'public/icons/icon-maskable-512.png',
+    'public/offline.html',
+  ].map(path => readFileSync(resolve(rootDir, path)));
+
+  return {
+    name: 'fana-pwa',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        let pathname: string;
+        try { pathname = new URL(req.url || '/', 'http://fana.local').pathname; }
+        catch { return next(); }
+        if (pathname !== '/sw.js') return next();
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Service-Worker-Allowed', '/');
+        res.end(serviceWorkerTemplate
+          .replace('__FANA_CACHE_VERSION__', JSON.stringify('dev'))
+          .replace('__FANA_PRECACHE_URLS__', '[]'));
+      });
+    },
+    generateBundle(_options, bundle) {
+      const assetUrls = Object.keys(bundle)
+        .filter(fileName => /^assets\/.+\.(?:js|css)$/i.test(fileName))
+        .map(fileName => `/${fileName}`);
+      const precacheUrls = [
+        '/', '/index.html', '/manifest.webmanifest', '/favicon.svg', '/apple-touch-icon.png',
+        '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png', '/offline.html',
+        ...assetUrls,
+      ];
+      const indexHtml = bundle['index.html'];
+      const htmlSource = indexHtml?.type === 'asset'
+        ? (typeof indexHtml.source === 'string' ? indexHtml.source : indexHtml.source.toString())
+        : '';
+      const version = createHash('sha256')
+        .update([...precacheUrls].sort().join('\n'))
+        .update(htmlSource)
+        .update(Buffer.concat(sourceForVersion))
+        .digest('hex')
+        .slice(0, 12);
+      const source = serviceWorkerTemplate
+        .replace('__FANA_CACHE_VERSION__', JSON.stringify(version))
+        .replace('__FANA_PRECACHE_URLS__', JSON.stringify(precacheUrls));
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source });
+    },
+  };
+}
 
 /** Serve the same authenticated Vercel function handlers during plain Vite development. */
 function localApiPlugin(): Plugin {
@@ -66,7 +122,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [localApiPlugin(), react(), tailwindcss()],
+    plugins: [localApiPlugin(), pwaPlugin(), react(), tailwindcss()],
     resolve: {
       alias: {
         '@': rootDir,

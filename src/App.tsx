@@ -13,6 +13,7 @@ const CaisseView = lazy(() => import('./components/caisse/CaisseView').then(modu
 const FinancialReportView = lazy(() => import('./components/finance/FinancialReportView').then(module => ({ default: module.FinancialReportView })));
 import { Produit } from './types';
 import { RefreshCw, Store, TriangleAlert, X } from 'lucide-react';
+import { NetworkStatusBanner } from './components/pwa/PwaControls';
 
 function MainLayout() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('pos');
@@ -23,7 +24,7 @@ function MainLayout() {
     if (product) addToCart(product);
   };
 
-  return <div className="flex h-[100dvh] min-h-[100dvh] w-full flex-col overflow-hidden bg-slate-900 text-slate-100">
+  return <div className="flex h-[100dvh] min-h-[100dvh] w-full flex-col overflow-hidden bg-slate-900 pt-[env(safe-area-inset-top)] text-slate-100">
     <Navigation activeTab={activeTab} onSelectTab={setActiveTab} />
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <SidebarNavigation activeTab={activeTab} onSelectTab={setActiveTab} />
@@ -68,5 +69,5 @@ function SessionRouter() {
 }
 
 export default function App() {
-  return <AuthProvider><SessionRouter /></AuthProvider>;
+  return <AuthProvider><SessionRouter /><NetworkStatusBanner /></AuthProvider>;
 }
