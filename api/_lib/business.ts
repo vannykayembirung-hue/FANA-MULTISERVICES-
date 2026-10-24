@@ -57,6 +57,16 @@ function normalizeFloat(data: any): FlotteSolde {
 function normalizeSession(data: any): CaisseSession {
   return { ...EMPTY_SESSION, ...(data || {}) };
 }
+function hideProductCosts(product: Produit): Produit {
+  const { prixAchat: _purchasePrice, ...safeProduct } = product as any;
+  return {
+    ...safeProduct,
+    lots: (product.lots || []).map(lot => {
+      const { prixAchat: _lotPurchasePrice, ...safeLot } = lot as any;
+      return safeLot;
+    }),
+  } as Produit;
+}
 function dataOf(row: any): any {
   if (!row) return null;
   return typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
@@ -216,7 +226,9 @@ export async function readWorkspaceState(db: any, user: AppUser): Promise<any> {
   for (const product of products) {
     product.image = imageIds.has(product.id) ? productImageUrl(product.id) : '';
   }
-  const productById = new Map(products.map(product => [product.id, product]));
+  const isSeller = user.role === 'CAISSIER';
+  const visibleProducts = isSeller ? products.map(hideProductCosts) : products;
+  const productById = new Map(visibleProducts.map(product => [product.id, product]));
   const parkedCarts: ParkedCart[] = grouped.parked_carts.map(cart => ({
     ...cart,
     items: (cart.items || []).map((item: any) => {
@@ -227,6 +239,17 @@ export async function readWorkspaceState(db: any, user: AppUser): Promise<any> {
   }));
   const sessionRows = grouped.cash_sessions as CaisseSession[];
   const currentSession = sessionRows[0] ? normalizeSession(sessionRows[0]) : { ...EMPTY_SESSION };
+  // A seller may close their own active register, but must not receive another user's cash totals.
+  const visibleCurrentSession = isSeller && !(currentSession.statut === 'OUVERTE' && currentSession.ouvertParId === user.id)
+    ? {
+      ...EMPTY_SESSION,
+      id: currentSession.id,
+      dateOuverture: currentSession.dateOuverture,
+      statut: currentSession.statut,
+      ouvertPar: currentSession.ouvertPar,
+      ouvertParId: currentSession.ouvertParId,
+    }
+    : currentSession;
   const cashMovements = (grouped.cash_movements as MouvementCaisse[]).map(movement => ({
     ...movement,
     // Older supplier and stock-purchase outflows are balance-sheet movements, not operating expenses.
@@ -234,6 +257,25 @@ export async function readWorkspaceState(db: any, user: AppUser): Promise<any> {
   }));
   const settings = typeof organization.settings === 'string' ? JSON.parse(organization.settings) : organization.settings;
   const safeRate = Number(settings?.usdRate);
+  const visibleSales = isSeller
+    ? (grouped.sales as Vente[]).filter(sale => sale.caissierId === user.id).map(sale => {
+      const { margeEstimee: _margin, ...safeSale } = sale as any;
+      return {
+        ...safeSale,
+        lignes: (sale.lignes || []).map(line => {
+          const { coutUnitaire: _unitCost, coutTotal: _lineCost, ...safeLine } = line as any;
+          return safeLine;
+        }),
+      };
+    })
+    : grouped.sales as Vente[];
+  const visibleClients = isSeller ? (grouped.clients as Client[]).map(client => ({
+    id: client.id,
+    nom: client.nom,
+    telephone: client.telephone,
+    credit: client.credit,
+    plafondCredit: client.plafondCredit,
+  })) : grouped.clients as Client[];
 
   return {
     settings: {
@@ -241,29 +283,37 @@ export async function readWorkspaceState(db: any, user: AppUser): Promise<any> {
       usdRate: Number.isFinite(safeRate) && safeRate > 0 ? safeRate : null,
       organizationName: organization.name,
     } satisfies WorkspaceSettings & { organizationName: string },
-    products,
-    clients: grouped.clients as Client[],
-    suppliers: grouped.suppliers as Fournisseur[],
-    sales: grouped.sales as Vente[],
-    services: grouped.services as ServiceTransaction[],
-    serviceCatalog: grouped.service_catalog as ServiceCatalogItem[],
-    caisseSession: currentSession,
-    cashSessions: sessionRows,
-    mouvementsCaisse: cashMovements.filter(movement => movement.sessionId === currentSession.id),
-    cashMovements,
-    bonsReception: grouped.deliveries as BonReception[],
-    reglementsFournisseurs: grouped.supplier_payments as ReglementFournisseur[],
+    products: visibleProducts,
+    clients: visibleClients,
+    suppliers: isSeller ? [] : grouped.suppliers as Fournisseur[],
+    sales: visibleSales,
+    // Historical multiservice records stay in Neon; the module is hidden from the active app.
+    services: [],
+    serviceCatalog: [],
+    caisseSession: visibleCurrentSession,
+    cashSessions: isSeller ? [] : sessionRows,
+    mouvementsCaisse: isSeller ? [] : cashMovements.filter(movement => movement.sessionId === currentSession.id),
+    cashMovements: isSeller ? [] : cashMovements,
+    bonsReception: isSeller ? [] : grouped.deliveries as BonReception[],
+    reglementsFournisseurs: isSeller ? [] : grouped.supplier_payments as ReglementFournisseur[],
     parkedCarts,
-    flotteSolde: normalizeFloat(grouped.float_balances[0]),
+    flotteSolde: { ...ZERO_FLOAT },
   };
 }
 
 export async function handleWorkspaceAction(db: any, user: AppUser, body: Record<string, any>): Promise<any> {
   const action = typeof body.action === 'string' ? body.action : '';
   const orgId = user.organizationId;
-  const managerOnly = ['addProduct', 'updateProduct', 'deleteProduct', 'addLot', 'addClient', 'updateClient', 'addSupplier', 'updateSupplier', 'receiveGoods', 'paySupplier', 'adjustFloat', 'openCash', 'closeCash', 'cashMovement', 'updateSettings', 'addServiceCatalogItem', 'updateServiceCatalogItem', 'deleteServiceCatalogItem'];
+  const retiredActions = ['addService', 'addServiceCatalogItem', 'updateServiceCatalogItem', 'deleteServiceCatalogItem', 'adjustFloat'];
+  if (retiredActions.includes(action)) {
+    throw new ApiError(410, 'Les opérations multiservices sont désactivées. Les données historiques sont conservées.', 'MODULE_DISABLED');
+  }
+  const managerOnly = ['addProduct', 'updateProduct', 'deleteProduct', 'addLot', 'addClient', 'updateClient', 'addSupplier', 'updateSupplier', 'receiveGoods', 'paySupplier', 'cashMovement'];
   if (managerOnly.includes(action) && user.role === 'CAISSIER') {
-    throw new ApiError(403, 'Cette action est réservée au gérant du magasin.', 'FORBIDDEN');
+    throw new ApiError(403, 'Cette action est réservée au Gérant ou au Boss.', 'FORBIDDEN');
+  }
+  if (action === 'updateSettings' && user.role !== 'ADMIN') {
+    throw new ApiError(403, 'Les paramètres du magasin sont réservés au Boss.', 'FORBIDDEN');
   }
 
   await db.begin(async (tx: any) => {
@@ -602,7 +652,7 @@ export async function handleWorkspaceAction(db: any, user: AppUser, body: Record
         remise: discount, totalNet, paiement: method, montantRecu: method === 'ESPECE' ? received : totalNet,
         renduMonnaie: method === 'ESPECE' ? Math.max(0, Number((received - totalNet).toFixed(2))) : 0,
         clientId: client?.id, nomClient: client?.nom, caissierId: user.id, nomCaissier: user.name,
-        nomMagasin: rate[0]?.name || 'F.A.N.A Multiservices', devise: currency, tauxChange: usdRate,
+        nomMagasin: rate[0]?.name || 'F.A.N.A', devise: currency, tauxChange: usdRate,
         referencePaiement: typeof body.referencePaiement === 'string' ? body.referencePaiement.trim().slice(0, 100) : '',
         telephonePaiement: typeof body.telephonePaiement === 'string' ? body.telephonePaiement.trim().slice(0, 40) : '',
         lignes: lines, margeEstimee: Number(margin.toFixed(2)),
@@ -718,7 +768,7 @@ export async function handleWorkspaceAction(db: any, user: AppUser, body: Record
       const sessionId = id('session');
       const session: CaisseSession = {
         ...EMPTY_SESSION, id: sessionId, dateOuverture: new Date().toISOString(), fondOuverture: openingFund,
-        statut: 'OUVERTE', ouvertPar: user.name, totalEspecesAttendu: openingFund,
+        statut: 'OUVERTE', ouvertPar: user.name, ouvertParId: user.id, totalEspecesAttendu: openingFund,
       };
       await insertRecord(tx, orgId, 'cash_sessions', sessionId, session);
       return;
@@ -728,9 +778,12 @@ export async function handleWorkspaceAction(db: any, user: AppUser, body: Record
       const sessionId = text(body.sessionId, 'Session de caisse', 1, 100);
       const session = await getRecord(tx, orgId, 'cash_sessions', sessionId, true) as CaisseSession | null;
       if (!session || session.statut !== 'OUVERTE') throw new ApiError(409, 'Cette session de caisse n’est plus ouverte.');
+      if (user.role === 'CAISSIER' && session.ouvertParId !== user.id) {
+        throw new ApiError(403, 'Seul le vendeur qui a ouvert cette session peut la clôturer.', 'FORBIDDEN');
+      }
       const actual = asNumber(body.montantReelCompte, 'Le montant compté', { allowZero: true });
       const closed: CaisseSession = {
-        ...session, statut: 'CLOTUREE', dateFermeture: new Date().toISOString(), cloturePar: user.name,
+        ...session, statut: 'CLOTUREE', dateFermeture: new Date().toISOString(), cloturePar: user.name, clotureParId: user.id,
         montantReelCompte: actual, ecartCaisse: Number((actual - session.totalEspecesAttendu).toFixed(2)),
         notesCloture: typeof body.notes === 'string' ? body.notes.trim().slice(0, 500) : '',
       };

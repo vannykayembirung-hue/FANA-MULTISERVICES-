@@ -1,6 +1,8 @@
-# F.A.N.A Multiservices
+# F.A.N.A — Gestion du magasin
 
-Application de gestion de magasin avec point de vente, caisse, stock FEFO, clients, fournisseurs, opérations multiservices et rapports. Les montants sont enregistrés dans le grand livre en CDF; l’affichage USD utilise un taux CDF/USD saisi par le gérant.
+Application de gestion de magasin avec point de vente, caisse, stock FEFO, clients, fournisseurs et rapports. Les rôles sont Boss, Gérant et Vendeur. Les montants sont enregistrés dans le grand livre en CDF; l’affichage USD utilise le taux CDF/USD saisi par le Boss.
+
+Les écrans et opérations multiservices sont désactivés. Aucun enregistrement historique n’est supprimé : anciennes opérations, catalogues et soldes restent conservés dans Neon.
 
 ## Développement local
 

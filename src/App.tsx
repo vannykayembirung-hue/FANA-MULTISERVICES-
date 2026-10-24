@@ -6,7 +6,7 @@ import { Navigation, SidebarNavigation, MobileNavigation, ActiveTab } from './co
 const PosView = lazy(() => import('./components/pos/PosView').then(module => ({ default: module.PosView })));
 const DashboardView = lazy(() => import('./components/dashboard/DashboardView').then(module => ({ default: module.DashboardView })));
 const ProductsView = lazy(() => import('./components/products/ProductsView').then(module => ({ default: module.ProductsView })));
-const MultiservicesView = lazy(() => import('./components/multiservices/MultiservicesView').then(module => ({ default: module.MultiservicesView })));
+const TeamView = lazy(() => import('./components/team/TeamView').then(module => ({ default: module.TeamView })));
 const ClientsView = lazy(() => import('./components/clients/ClientsView').then(module => ({ default: module.ClientsView })));
 const FournisseursView = lazy(() => import('./components/fournisseurs/FournisseursView').then(module => ({ default: module.FournisseursView })));
 const CaisseView = lazy(() => import('./components/caisse/CaisseView').then(module => ({ default: module.CaisseView })));
@@ -42,14 +42,13 @@ function MainLayout() {
             {activeTab === 'pos' && <PosView />}
             {activeTab === 'dashboard' && <DashboardView
               onNavigateToProducts={() => setActiveTab('products')}
-              onNavigateToServices={() => setActiveTab('services')}
               onNavigateToPos={openProductInPos}
               onNavigateToSuppliers={() => setActiveTab('suppliers')}
               onNavigateToFinance={() => setActiveTab('finance')}
             />}
             {activeTab === 'finance' && <FinancialReportView />}
             {activeTab === 'products' && <ProductsView />}
-            {activeTab === 'services' && <MultiservicesView />}
+            {activeTab === 'team' && <TeamView />}
             {activeTab === 'clients' && <ClientsView />}
             {activeTab === 'suppliers' && <FournisseursView />}
             {activeTab === 'caisse' && <CaisseView />}

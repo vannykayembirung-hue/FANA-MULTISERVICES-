@@ -45,7 +45,7 @@ export const AuthScreen: React.FC = () => {
               <div className="h-12 w-12 rounded-2xl bg-orange-500 flex items-center justify-center text-white shadow-lg shadow-orange-950/40"><Store size={24} /></div>
               <div>
                 <div className="font-black tracking-wide text-white text-lg">F.A.N.A</div>
-                <div className="text-[10px] tracking-[0.22em] text-orange-300 font-bold">MULTISERVICES</div>
+                <div className="text-[10px] tracking-[0.22em] text-orange-300 font-bold">GESTION DU MAGASIN</div>
               </div>
             </div>
             <div className="mt-24 max-w-xl">
@@ -80,13 +80,13 @@ export const AuthScreen: React.FC = () => {
           <div className="w-full max-w-md">
             <div className="lg:hidden flex items-center gap-3 mb-9">
               <div className="h-11 w-11 rounded-2xl bg-orange-500 flex items-center justify-center text-white"><Store size={23} /></div>
-              <div><div className="font-black text-white">F.A.N.A</div><div className="text-[10px] tracking-[0.2em] text-orange-300 font-bold">MULTISERVICES</div></div>
+              <div><div className="font-black text-white">F.A.N.A</div><div className="text-[10px] tracking-[0.2em] text-orange-300 font-bold">GESTION DU MAGASIN</div></div>
             </div>
             <div className="mb-8">
               <p className="text-xs font-bold uppercase tracking-[0.2em] text-orange-400">Espace magasin sécurisé</p>
               <h2 className="mt-3 text-3xl font-black text-white">{mode === 'login' ? 'Bon retour.' : 'Créer votre espace.'}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-400">
-                {mode === 'login' ? 'Connectez-vous pour retrouver les données de votre entreprise.' : 'Le premier compte devient administrateur du magasin.'}
+                {mode === 'login' ? 'Connectez-vous pour retrouver les données de votre entreprise.' : 'Le premier compte devient le Boss du magasin.'}
               </p>
             </div>
 

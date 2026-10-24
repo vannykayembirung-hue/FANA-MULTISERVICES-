@@ -26,7 +26,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ sale, 
       'REÇU DE VENTE',
       `Ticket : ${sale.numeroTicket}`,
       `Date : ${formatDateTime(sale.createdAt)}`,
-      `Caissier : ${sale.nomCaissier}`,
+      `Vendeur : ${sale.nomCaissier}`,
       ...(sale.nomClient ? [`Client : ${sale.nomClient}`] : []),
       '--------------------------------',
       ...sale.lignes.flatMap(line => [
@@ -70,7 +70,7 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({ sale, 
           <div className="mb-2 space-y-1 border-b border-dashed border-gray-400 pb-2 text-[10px]">
             <div className="flex justify-between gap-2"><span>Ticket :</span><strong>{sale.numeroTicket}</strong></div>
             <div className="flex justify-between gap-2"><span>Date :</span><span>{formatDateTime(sale.createdAt)}</span></div>
-            <div className="flex justify-between gap-2"><span>Caissier :</span><span>{sale.nomCaissier}</span></div>
+            <div className="flex justify-between gap-2"><span>Vendeur :</span><span>{sale.nomCaissier}</span></div>
             {sale.nomClient && <div className="flex justify-between gap-2"><span>Client :</span><span>{sale.nomClient}</span></div>}
           </div>
 

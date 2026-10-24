@@ -145,7 +145,9 @@ export interface CaisseSession {
   fondOuverture: number;
   statut: 'OUVERTE' | 'CLOTUREE';
   ouvertPar: string;
+  ouvertParId?: string;
   cloturePar?: string;
+  clotureParId?: string;
   totalEspecesAttendu: number;
   totalMpesa: number;
   totalOrangeMoney: number;

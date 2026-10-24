@@ -5,7 +5,6 @@ import { hardwareScanner, ScannerStatus } from '../../utils/hardwareScanner';
 import { HardwareScannerModal } from './HardwareScannerModal';
 import { 
   Search, 
-  Barcode, 
   Scale, 
   AlertCircle,
   Layers,
@@ -26,7 +25,6 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   onRequestWeigh,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('TOUS');
-  const [barcodeInput, setBarcodeInput] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [scanSuccessMessage, setScanSuccessMessage] = useState<string | null>(null);
   const [isHardwareModalOpen, setIsHardwareModalOpen] = useState<boolean>(false);
@@ -43,6 +41,13 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       const matched = products.find(p => p.ean === cleanEan);
 
       if (matched) {
+        if (matched.stock <= 0) {
+          posAudio.playError();
+          setScanSuccessMessage(`« ${matched.nom} » est en rupture de stock`);
+          setTimeout(() => setScanSuccessMessage(null), 3000);
+          setSearchQuery('');
+          return;
+        }
         posAudio.playBeep();
         if (matched.unite === 'KG') {
           onRequestWeigh(matched);
@@ -50,10 +55,12 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
           onSelectProduct(matched);
         }
         const srcLabel = source === 'SERIAL' ? 'Web Serial' : source === 'HID' ? 'Web HID' : 'Douchette USB';
+        setSearchQuery('');
         setScanSuccessMessage(`Scanné via ${srcLabel} : ${matched.nom}`);
         setTimeout(() => setScanSuccessMessage(null), 3000);
       } else {
         posAudio.playError();
+        setSearchQuery('');
         setScanSuccessMessage(`Code-barre [${cleanEan}] non répertorié`);
         setTimeout(() => setScanSuccessMessage(null), 3000);
       }
@@ -78,27 +85,25 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
     return matchesCategory && matchesSearch;
   });
 
-  // Handle direct barcode scanning via physical scanner or Enter key
-  const handleBarcodeSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const cleanEan = barcodeInput.trim();
+  // Pressing Enter on a full barcode adds that product; ordinary text remains a search filter.
+  const handleSearchSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const cleanEan = searchQuery.trim();
     if (!cleanEan) return;
-
-    const matched = products.find(p => p.ean === cleanEan);
-    if (matched) {
-      if (matched.unite === 'KG') {
-        onRequestWeigh(matched);
-      } else {
-        onSelectProduct(matched);
-      }
-      setScanSuccessMessage(`Scanné : ${matched.nom}`);
-      setTimeout(() => setScanSuccessMessage(null), 2500);
-      setBarcodeInput('');
-    } else {
+    const matched = products.find(product => product.ean === cleanEan);
+    if (!matched) return;
+    if (matched.stock <= 0) {
       posAudio.playError();
-      setScanSuccessMessage(`Code-barre ${cleanEan} non trouvé`);
+      setScanSuccessMessage(`« ${matched.nom} » est en rupture de stock`);
       setTimeout(() => setScanSuccessMessage(null), 2500);
+      return;
     }
+    if (matched.unite === 'KG') onRequestWeigh(matched);
+    else onSelectProduct(matched);
+    posAudio.playBeep();
+    setScanSuccessMessage(`Code reconnu : ${matched.nom}`);
+    setTimeout(() => setScanSuccessMessage(null), 2500);
+    setSearchQuery('');
   };
 
   const handleProductCardClick = (product: Produit) => {
@@ -111,66 +116,35 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-900 overflow-hidden border-r border-slate-800">
-      {/* Top Search & Barcode Scanner Bar */}
+      {/* One field for product names and direct EAN entry */}
       <div className="p-3 bg-slate-950 border-b border-slate-800 flex items-center gap-2">
-        {/* Search input */}
-        <div className="relative flex-1">
+        <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-0">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
-            placeholder="Rechercher un produit ou un rayon…"
+            placeholder="Rechercher un produit ou saisir un code-barres…"
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-slate-850 border border-slate-750 rounded-xl text-white text-sm placeholder-slate-400 focus:outline-hidden focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+            onChange={event => setSearchQuery(event.target.value)}
+            className="w-full pl-9 pr-9 py-2.5 bg-slate-850 border border-slate-750 rounded-xl text-white text-sm placeholder-slate-400 focus:outline-hidden focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+            aria-label="Rechercher un produit ou saisir un code-barres"
           />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-
-        {/* Barcode Quick Input / Douchette */}
-        <form onSubmit={handleBarcodeSubmit} className="relative w-44 sm:w-56 flex items-center">
-          <Barcode className="w-4 h-4 text-orange-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Scanner / saisir un EAN"
-            value={barcodeInput}
-            onChange={e => setBarcodeInput(e.target.value)}
-            className="w-full pl-8 pr-7 py-2 bg-slate-850 border border-slate-750 rounded-xl text-white text-xs font-mono placeholder-slate-500 focus:outline-hidden focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-          />
-          <button
-            type="submit"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 hover:bg-orange-500 hover:text-white text-[10px] font-bold transition-colors"
-          >
-            OK
-          </button>
+          {searchQuery && <button type="button" onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white" aria-label="Effacer la recherche">✕</button>}
         </form>
-
-        {/* Hardware Scanner Web Serial / HID Connection Button */}
         <button
           type="button"
           onClick={() => setIsHardwareModalOpen(true)}
-          className={`p-2 rounded-xl border flex items-center gap-1.5 text-xs font-semibold shrink-0 transition-all ${
+          className={`p-2.5 rounded-xl border flex items-center gap-1.5 text-xs font-semibold shrink-0 transition-all ${
             scannerStatus.isSerialConnected || scannerStatus.isHidConnected
               ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300 shadow-sm'
               : 'bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-750'
           }`}
-          title="Connecter et gérer votre douchette code-barres (Web Serial & HID)"
+          title="Configurer une douchette code-barres"
+          aria-label="Configurer une douchette code-barres"
         >
           <Usb className="w-4 h-4 text-orange-400" />
-          <span className="hidden md:inline">
-            {scannerStatus.isSerialConnected ? 'Port Série Connecté' : scannerStatus.isHidConnected ? 'USB HID Connecté' : 'Scanner USB / HID'}
-          </span>
-          {(scannerStatus.isSerialConnected || scannerStatus.isHidConnected) && (
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          )}
+          <span className="hidden lg:inline">{scannerStatus.isSerialConnected ? 'Scanner connecté' : scannerStatus.isHidConnected ? 'Scanner connecté' : 'Scanner'}</span>
+          {(scannerStatus.isSerialConnected || scannerStatus.isHidConnected) && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
         </button>
-
       </div>
 
       {/* Notification Toast for Scan */}
@@ -328,12 +302,19 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             const cleanEan = barcode.trim();
             const matched = products.find(p => p.ean === cleanEan);
             if (matched) {
+              if (matched.stock <= 0) {
+                posAudio.playError();
+                setScanSuccessMessage(`« ${matched.nom} » est en rupture de stock`);
+                setTimeout(() => setScanSuccessMessage(null), 3000);
+                return;
+              }
               if (matched.unite === 'KG') {
                 onRequestWeigh(matched);
               } else {
                 onSelectProduct(matched);
               }
               const srcLabel = source === 'SERIAL' ? 'Web Serial' : source === 'HID' ? 'Web HID' : 'Douchette USB';
+              setSearchQuery('');
               setScanSuccessMessage(`Scanné via ${srcLabel} : ${matched.nom}`);
               setTimeout(() => setScanSuccessMessage(null), 3000);
             } else {

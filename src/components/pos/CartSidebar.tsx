@@ -11,8 +11,6 @@ import {
   Tag,
   Clock,
   ChevronRight,
-  Banknote,
-  BookOpen,
   Receipt,
 } from 'lucide-react';
 
@@ -34,6 +32,7 @@ interface CartSidebarProps {
   onOpenParkedModal: () => void;
   onOpenRecentSales?: () => void;
   ticketNumber: string;
+  onManageCashSession: () => void;
 }
 
 export const CartSidebar: React.FC<CartSidebarProps> = ({
@@ -54,9 +53,11 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
   onOpenParkedModal,
   onOpenRecentSales,
   ticketNumber,
+  onManageCashSession,
 }) => {
-  const { toBaseAmount, displayCurrency, caisseSession, isSaving } = useApp();
+  const { toBaseAmount, displayCurrency, caisseSession, isSaving, currentRole, user } = useApp();
   const canCheckout = caisseSession.statut === 'OUVERTE' && !isSaving;
+  const canManageCurrentSession = currentRole !== 'CAISSIER' || caisseSession.ouvertParId === user.id;
   const [showDiscountInput, setShowDiscountInput] = useState<boolean>(false);
   const [customDiscountValue, setCustomDiscountValue] = useState<string>('');
   const [discountType, setDiscountType] = useState<'FIXED' | 'PERCENT'>('FIXED');
@@ -75,7 +76,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
   };
 
   return (
-    <div className="w-full sm:w-[380px] lg:w-[420px] flex flex-col h-full bg-slate-950 border-l border-slate-800 shrink-0">
+    <div className="w-full md:w-[380px] lg:w-[420px] flex flex-col h-full bg-slate-950 border-l border-slate-800 shrink-0">
       {/* Cart Header */}
       <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -133,11 +134,14 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
         </div>
       </div>
 
-      {caisseSession.statut !== 'OUVERTE' && (
-        <div role="status" className="border-b border-amber-800/60 bg-amber-950/40 px-3 py-2 text-[11px] text-amber-200">
-          Ouvrez une session dans l’onglet Caisse avant d’encaisser une vente.
-        </div>
-      )}
+      <div className={`flex items-center justify-between gap-2 border-b px-3 py-2 text-[11px] ${caisseSession.statut === 'OUVERTE' ? 'border-emerald-900/50 bg-emerald-950/25 text-emerald-200' : 'border-amber-800/60 bg-amber-950/30 text-amber-200'}`}>
+        <span className="min-w-0 truncate" role="status">
+          {caisseSession.statut === 'OUVERTE' ? `Session ouverte par ${caisseSession.ouvertPar || 'le magasin'}` : 'Caisse fermée — ouvrez-la avant la vente'}
+        </span>
+        <button type="button" onClick={onManageCashSession} disabled={!canManageCurrentSession || isSaving} className="shrink-0 rounded-lg border border-current/30 px-2.5 py-1.5 font-bold transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-45">
+          {caisseSession.statut === 'OUVERTE' ? canManageCurrentSession ? 'Clôturer' : 'Session active' : 'Ouvrir la caisse'}
+        </button>
+      </div>
 
       {/* Client Quick Picker Bar */}
       <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between text-xs">
@@ -370,7 +374,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
               <span className="text-xs uppercase font-extrabold tracking-wider text-slate-300 block">
                 Total Net
               </span>
-              <span className="text-[10px] text-slate-500">Toutes taxes comprises</span>
+              <span className="text-[10px] text-slate-500">Montant à payer</span>
             </div>
             <span className="text-2xl font-black text-white font-mono tracking-tight">
               {formatMoney(cartTotalNet)}
@@ -378,51 +382,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
           </div>
         </div>
 
-        {/* Fast Payment Preset Buttons */}
-        <div className="grid grid-cols-4 gap-1.5 pt-1">
-          <button
-            type="button"
-            disabled={cart.length === 0 || !canCheckout}
-            onClick={() => onOpenPaymentModal('ESPECE')}
-            className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-emerald-950/60 hover:border-emerald-700/80 border border-slate-750 text-slate-200 hover:text-emerald-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
-          >
-            <Banknote className="w-4 h-4 text-emerald-400" />
-            <span>Espèce</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={cart.length === 0 || !canCheckout}
-            onClick={() => onOpenPaymentModal('MPESA')}
-            className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-red-950/60 hover:border-red-700/80 border border-slate-750 text-slate-200 hover:text-red-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
-          >
-            <div className="w-4 h-4 rounded-full bg-red-600 text-white font-extrabold text-[8px] flex items-center justify-center">M</div>
-            <span>M-Pesa</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={cart.length === 0 || !canCheckout}
-            onClick={() => onOpenPaymentModal('ORANGE_MONEY')}
-            className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-orange-950/60 hover:border-orange-700/80 border border-slate-750 text-slate-200 hover:text-orange-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
-          >
-            <div className="w-4 h-4 rounded bg-orange-600 text-white font-extrabold text-[9px] flex items-center justify-center">
-              OM
-            </div>
-            <span>Orange</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={cart.length === 0 || !canCheckout}
-            onClick={() => onOpenPaymentModal('CREDIT')}
-            className="py-2.5 px-2 rounded-xl bg-slate-800 hover:bg-amber-950/60 hover:border-amber-700/80 border border-slate-750 text-slate-200 hover:text-amber-300 font-bold text-[11px] flex flex-col items-center gap-1 transition-all disabled:opacity-40"
-          >
-            <BookOpen className="w-4 h-4 text-amber-400" />
-            <span>Ardoise</span>
-          </button>
-        </div>
-
+        {/* One checkout action opens all available payment methods. */}
         {/* Master Pay Button & Park action */}
         <div className="flex items-center gap-2 pt-1">
           <button
@@ -441,7 +401,7 @@ export const CartSidebar: React.FC<CartSidebarProps> = ({
             onClick={() => onOpenPaymentModal()}
             className="flex-1 py-3.5 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-xl shadow-orange-500/25 transition-all"
           >
-            <span>PAYER {formatCurrencyShort(cartTotalNet)}</span>
+            <span>Encaisser {formatCurrencyShort(cartTotalNet)}</span>
             <ChevronRight className="w-5 h-5" />
           </button>
         </div>
