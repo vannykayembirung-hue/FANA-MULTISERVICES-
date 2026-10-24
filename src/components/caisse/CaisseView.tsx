@@ -540,7 +540,7 @@ export const CaisseView: React.FC = () => {
 
                 <div className="text-center text-[9px] pt-2 space-y-4">
                   <div className="flex justify-between text-[9px] pt-4">
-                    <span>Signature Caissier :</span>
+                    <span>Signature Vendeur :</span>
                     <span>Visa Gérant :</span>
                   </div>
                   <p className="font-bold">*** FIN DU RAPPORT Z ***</p>

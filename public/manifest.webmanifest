@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "F.A.N.A Multiservices",
+  "name": "F.A.N.A — Gestion du magasin",
   "short_name": "F.A.N.A",
-  "description": "Gestion de magasin et point de vente F.A.N.A Multiservices.",
+  "description": "Gestion du magasin et point de vente F.A.N.A.",
   "lang": "fr-CD",
   "start_url": "/",
   "scope": "/",

@@ -1,4 +1,4 @@
-import type { Vente, Produit, ServiceTransaction, Client } from '../types';
+import type { Vente, Produit, Client } from '../types';
 import type { DaySalesData } from '../components/dashboard/SalesLineChart';
 import { formatDateTime } from './format';
 
@@ -41,7 +41,6 @@ export function exportFullAccountingCsv({
   trendData,
   caJour,
   margeJour,
-  services,
   clients,
   products,
   organizationName,
@@ -50,7 +49,6 @@ export function exportFullAccountingCsv({
   trendData: DaySalesData[];
   caJour: number;
   margeJour: number;
-  services: ServiceTransaction[];
   clients: Client[];
   products: Produit[];
   organizationName?: string;
@@ -59,7 +57,6 @@ export function exportFullAccountingCsv({
   const todayKey = localDateKey(now);
   const dateStr = todayKey || now.toISOString().slice(0, 10);
   const todaySales = sales.filter(sale => localDateKey(sale.createdAt) === todayKey);
-  const todayServices = services.filter(service => localDateKey(service.date) === todayKey);
   const lines: string[] = [];
 
   lines.push(escapeCsv(organizationName || 'Organisation non renseignée') + ';RAPPORT COMMERCIAL ET COMPTABILITÉ');
@@ -73,7 +70,6 @@ export function exportFullAccountingCsv({
   lines.push(`Marge estimée du jour (CDF);${toCsvNumber(margeJour)}`);
   lines.push(`Taux de marge;${caJour > 0 ? ((margeJour / caJour) * 100).toFixed(1) : '0'}%`);
   lines.push(`Nombre de ventes du jour;${todaySales.length}`);
-  lines.push(`Commissions multiservices du jour (CDF);${toCsvNumber(todayServices.reduce((sum, service) => sum + service.commission, 0))}`);
   lines.push(`Encours des crédits clients (CDF);${toCsvNumber(clients.reduce((sum, client) => sum + client.credit, 0))}`);
   lines.push(`Produits enregistrés;${products.length}`);
   lines.push('');
@@ -90,7 +86,7 @@ export function exportFullAccountingCsv({
   lines.push('');
 
   lines.push('=== 3. GRAND LIVRE DES VENTES ===');
-  lines.push('N° ticket;Date et heure;Caissier;Client;Mode de paiement;Sous-total brut (CDF);Remise (CDF);Net à payer (CDF);Marge estimée (CDF);Articles vendus');
+  lines.push('N° ticket;Date et heure;Vendeur;Client;Mode de paiement;Sous-total brut (CDF);Remise (CDF);Net à payer (CDF);Marge estimée (CDF);Articles vendus');
   sales.forEach(sale => {
     const articles = sale.lignes.map(line => `${line.nomProduit} (x${line.quantite})`).join(' + ');
     lines.push([
@@ -102,23 +98,13 @@ export function exportFullAccountingCsv({
   });
   lines.push('');
 
-  lines.push('=== 4. JOURNAL DES OPÉRATIONS MULTISERVICES ===');
-  lines.push('ID transaction;Date et heure;Service;Type;Montant de l’opération (CDF);Commission (CDF);Téléphone client;Référence');
-  services.forEach(service => {
-    lines.push([
-      escapeCsv(service.id), escapeCsv(formatDateTime(service.date)), escapeCsv(service.nom),
-      escapeCsv(service.type), toCsvNumber(service.montant), toCsvNumber(service.commission),
-      escapeCsv(service.telephoneClient || ''), escapeCsv(service.reference || ''),
-    ].join(';'));
-  });
-
   downloadCsvFile(lines.join('\r\n'), `FANA-Rapport-Comptable-${dateStr}.csv`);
 }
 
 export function exportSalesTrendsCsv(trendData: DaySalesData[]): void {
   const dateStr = localDateKey(new Date());
   const lines = [
-    'F.A.N.A MULTISERVICES - TENDANCES DES VENTES (DONNÉES ENREGISTRÉES)',
+    'F.A.N.A - TENDANCES DES VENTES (DONNÉES ENREGISTRÉES)',
     `Date d’extraction;${escapeCsv(new Date().toLocaleString('fr-CD'))}`,
     'Devise du grand livre;CDF',
     '',

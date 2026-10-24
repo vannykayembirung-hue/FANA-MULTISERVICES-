@@ -192,8 +192,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode; user: AppUser }>
 
   const addToCart = (product: Produit, quantity = 1) => {
     if (!Number.isFinite(quantity) || quantity <= 0) return;
-    if (product.stock <= 0) {
-      setError(`« ${product.nom} » est en rupture de stock.`);
+    const currentQuantity = cart.find(item => item.produit.id === product.id)?.quantite || 0;
+    if (currentQuantity + quantity > product.stock + 0.000001) {
+      setError(product.stock <= 0
+        ? `« ${product.nom} » est en rupture de stock.`
+        : `Stock insuffisant pour « ${product.nom} » — ${product.stock} disponible(s).`);
+      posAudio.playError();
       return;
     }
     setError(null);
@@ -208,7 +212,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode; user: AppUser }>
   };
   const updateCartItemQuantity = (productId: string, quantity: number) => {
     if (quantity <= 0) { setCart(previous => previous.filter(item => item.produit.id !== productId)); return; }
-    setCart(previous => previous.map(item => item.produit.id === productId ? { ...item, quantite: Number(quantity.toFixed(3)) } : item));
+    const item = cart.find(cartItem => cartItem.produit.id === productId);
+    const product = products.find(candidate => candidate.id === productId) || item?.produit;
+    if (!Number.isFinite(quantity) || (product && quantity > product.stock + 0.000001)) {
+      setError(product ? `Stock insuffisant pour « ${product.nom} » — ${product.stock} disponible(s).` : 'Quantité invalide.');
+      posAudio.playError();
+      return;
+    }
+    setError(null);
+    setCart(previous => previous.map(cartItem => cartItem.produit.id === productId ? { ...cartItem, quantite: Number(quantity.toFixed(3)) } : cartItem));
   };
   const removeFromCart = (productId: string) => setCart(previous => previous.filter(item => item.produit.id !== productId));
   const clearCart = () => { setCart([]); setCartDiscountState(0); setSelectedClientId(null); };

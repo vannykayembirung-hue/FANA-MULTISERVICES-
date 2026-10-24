@@ -6,13 +6,13 @@ import { SalesLineChart, DaySalesData } from './SalesLineChart';
 import { exportFullAccountingCsv, exportSalesTrendsCsv, downloadCsvFile, escapeCsvCell } from '../../utils/csvExport';
 import { posAudio } from '../../utils/audio';
 import { PaymentMethod, Produit } from '../../types';
+import { roleLabel } from '../../utils/roles';
 import { 
   TrendingUp, 
   DollarSign, 
   AlertTriangle, 
   PackageX, 
   Layers, 
-  Smartphone, 
   ArrowUpRight, 
   Clock, 
   CheckCircle, 
@@ -47,19 +47,17 @@ const DASHBOARD_PAYMENT_METHODS: Array<{ id: PaymentMethod; label: string; color
 
 export const DashboardView: React.FC<{
   onNavigateToProducts?: () => void;
-  onNavigateToServices?: () => void;
   onNavigateToPos?: (product?: Produit) => void;
   onNavigateToSuppliers?: () => void;
   onNavigateToFinance?: () => void;
 }> = ({
   onNavigateToProducts,
-  onNavigateToServices,
   onNavigateToPos,
   onNavigateToSuppliers,
   onNavigateToFinance,
 }) => {
-  const { sales, products, services, clients, addToCart, settings, currentRole } = useApp();
-  const roleLabel = currentRole === 'ADMIN' ? 'Administrateur' : currentRole === 'GERANT' ? 'Gérant' : 'Caissier';
+  const { sales, products, clients, addToCart, settings, currentRole } = useApp();
+  const currentRoleLabel = roleLabel(currentRole);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
   const [caPeriod, setCaPeriod] = useState<'JOUR' | 'SEMAINE' | 'MOIS'>('JOUR');
@@ -103,10 +101,6 @@ export const DashboardView: React.FC<{
 
   // Out of stock or low stock items
   const lowStockProducts = products.filter(p => p.stock <= p.stockAlerte);
-
-  // Multiservices total commissions today
-  const todayServices = services.filter(srv => localDateKey(srv.date) === todayStr);
-  const totalCommissionsToday = todayServices.reduce((acc, s) => acc + s.commission, 0);
 
   // Total Client Debts (Ardoises en cours)
   const totalCreditsClients = clients.reduce((acc, c) => acc + c.credit, 0);
@@ -204,9 +198,9 @@ export const DashboardView: React.FC<{
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-800">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
-            <span>Tableau de Bord Gérant</span>
+            <span>Tableau de bord</span>
             <span className="text-xs px-2 py-0.5 rounded-md bg-orange-500/20 text-orange-400 font-bold border border-orange-500/30">
-              {roleLabel}
+              {currentRoleLabel}
             </span>
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -468,23 +462,7 @@ export const DashboardView: React.FC<{
       </div>
 
       {/* Secondary Quick Metrics Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Multiservices summary */}
-        <div className="p-4 rounded-xl bg-slate-850 border border-slate-750 flex items-center justify-between">
-          <div>
-            <span className="text-xs text-slate-400 font-medium">Commissions Multiservices (Jour)</span>
-            <div className="text-xl font-black text-sky-400 font-mono mt-0.5">
-              {formatMoney(totalCommissionsToday)}
-            </div>
-            <span className="text-[11px] text-slate-400">
-              {todayServices.length} opérations multiservices enregistrées
-            </span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center">
-            <Smartphone className="w-5 h-5" />
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Client Debts (Ardoise) */}
         <div className="p-4 rounded-xl bg-slate-850 border border-slate-750 flex items-center justify-between">
           <div>
@@ -704,7 +682,6 @@ export const DashboardView: React.FC<{
                     trendData: chartData,
                     caJour,
                     margeJour,
-                    services,
                     clients,
                     products,
                     organizationName: settings.organizationName,
@@ -725,7 +702,7 @@ export const DashboardView: React.FC<{
                   </span>
                 </div>
                 <p className="text-slate-400 text-[11px] leading-relaxed">
-                  Contient 4 sections : Synthèse du jour, tendances sur 7 jours, grand livre détaillé de chaque ticket de caisse, et relevé des commissions multiservices.
+                  Contient la synthèse du jour, les tendances sur 7 jours et le grand livre détaillé des tickets de caisse.
                 </p>
               </div>
 
@@ -758,7 +735,7 @@ export const DashboardView: React.FC<{
                 onClick={() => {
                   const nowStr = new Date().toISOString().split('T')[0];
                   const csvRows = [
-                    'N° ticket;Date;Caissier;Client;Paiement;Sous-total brut (CDF);Remise (CDF);Net (CDF);Marge estimée (CDF)',
+                    'N° ticket;Date;Vendeur;Client;Paiement;Sous-total brut (CDF);Remise (CDF);Net (CDF);Marge estimée (CDF)',
                     ...sales.map(sale => [
                       sale.numeroTicket, sale.createdAt, sale.nomCaissier, sale.nomClient || 'Comptant',
                       sale.paiement, sale.totalBrut, sale.remise, sale.totalNet, sale.margeEstimee,
@@ -782,7 +759,7 @@ export const DashboardView: React.FC<{
                   </span>
                 </div>
                 <p className="text-slate-400 text-[11px] leading-relaxed">
-                  Journal de chaque vente enregistrée, avec le client, le caissier, le mode de paiement et les montants du grand livre en CDF.
+                  Journal de chaque vente enregistrée, avec le client, le vendeur, le mode de paiement et les montants du grand livre en CDF.
                 </p>
               </div>
 
