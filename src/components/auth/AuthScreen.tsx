@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, BadgeCheck, Boxes, Eye, EyeOff, LockKeyhole, Mail, PackageCheck, ShieldCheck, Store } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { PwaInstallButton } from '../pwa/PwaControls';
 
 export const AuthScreen: React.FC = () => {
   const { login, register, error, clearError, status } = useAuth();
@@ -35,7 +36,7 @@ export const AuthScreen: React.FC = () => {
   };
 
   return (
-    <main className="min-h-[100dvh] bg-[#0a0f18] text-slate-100 flex items-center justify-center p-4 sm:p-8">
+    <main className="min-h-[100dvh] bg-[#0a0f18] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] text-slate-100 sm:p-8 sm:pt-[calc(2rem+env(safe-area-inset-top))] sm:pb-[calc(2rem+env(safe-area-inset-bottom))]">
       <div className="w-full max-w-6xl grid lg:grid-cols-[1.05fr_0.95fr] bg-slate-950 border border-slate-800 rounded-[2rem] overflow-hidden shadow-[0_30px_100px_rgba(0,0,0,.45)]">
         <section className="relative hidden lg:flex flex-col justify-between p-12 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-orange-500/20 via-slate-950 to-slate-950 min-h-[700px]">
           <div className="absolute -right-20 top-28 h-80 w-80 rounded-full bg-orange-500/10 blur-3xl" />
@@ -129,7 +130,8 @@ export const AuthScreen: React.FC = () => {
                 {mode === 'login' ? 'Créer un espace' : 'Se connecter'}
               </button>
             </div>
-            <p className="mt-8 text-center text-[11px] leading-5 text-slate-600">Session privée · Connexion chiffrée · Données isolées par entreprise</p>
+            <div className="mt-6 flex justify-center"><PwaInstallButton /></div>
+            <p className="mt-5 text-center text-[11px] leading-5 text-slate-600">Session privée · Connexion chiffrée · Données isolées par entreprise</p>
           </div>
         </section>
       </div>

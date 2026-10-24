@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "F.A.N.A Multiservices",
+  "short_name": "F.A.N.A",
+  "description": "Gestion de magasin et point de vente F.A.N.A Multiservices.",
+  "lang": "fr-CD",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "theme_color": "#0a0f18",
+  "background_color": "#0a0f18",
+  "categories": ["business", "productivity", "finance"],
+  "prefer_related_applications": false,
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

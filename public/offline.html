@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0f18" />
+    <title>Hors connexion · F.A.N.A</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0f18; color: #f8fafc; }
+      * { box-sizing: border-box; }
+      body { min-height: 100svh; margin: 0; display: grid; place-items: center; padding: 24px; }
+      main { width: min(100%, 440px); border: 1px solid #273449; border-radius: 24px; background: #111827; padding: 28px; box-shadow: 0 24px 70px #0006; }
+      .brand { display: flex; align-items: center; gap: 12px; font-weight: 800; letter-spacing: .04em; }
+      .mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: #f97316; font-size: 24px; }
+      h1 { margin: 26px 0 10px; font-size: 1.5rem; }
+      p { color: #cbd5e1; line-height: 1.65; }
+      .note { margin-top: 20px; border-left: 3px solid #f97316; padding: 10px 12px; background: #f9731617; color: #fed7aa; font-size: .9rem; }
+      button { width: 100%; margin-top: 20px; border: 0; border-radius: 12px; background: #f97316; color: white; padding: 13px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand"><span class="mark" aria-hidden="true">F</span><span>F.A.N.A MULTISERVICES</span></div>
+      <h1>Connexion Internet requise</h1>
+      <p>Reconnectez cet appareil à Internet, puis réessayez pour accéder aux données enregistrées dans votre espace magasin.</p>
+      <div class="note">Aucune vente ni opération n’est enregistrée hors connexion. Attendez la confirmation du serveur avant de remettre un ticket au client.</div>
+      <button type="button" onclick="location.reload()">Réessayer</button>
+    </main>
+  </body>
+</html>

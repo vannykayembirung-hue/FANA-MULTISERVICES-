@@ -6,6 +6,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { Currency, UserRole } from '../../types';
+import { PwaInstallButton } from '../pwa/PwaControls';
 
 export type ActiveTab = 'pos' | 'dashboard' | 'finance' | 'products' | 'services' | 'clients' | 'suppliers' | 'caisse';
 
@@ -61,6 +62,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onSelectTab }
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        <PwaInstallButton compact />
         <div className="flex items-center rounded-xl border border-slate-800 bg-slate-900 p-0.5" aria-label="Devise d’affichage">
           {(['CDF', 'USD'] as Currency[]).map(currency => (
             <button key={currency} type="button" onClick={() => void chooseCurrency(currency)} className={`min-w-12 rounded-lg px-2 py-1.5 text-xs font-extrabold transition ${displayCurrency === currency ? 'bg-orange-500 text-white' : 'text-slate-400 hover:text-white'}`}>
